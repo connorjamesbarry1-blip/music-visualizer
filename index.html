@@ -39,15 +39,192 @@
   <div id="visualizer-screen" class="screen">
     <canvas id="visualizer-canvas"></canvas>
 
-    <!-- Bottom-left: song name + artist. Hidden until a track is playing. -->
+    <!-- ── Settings gear + control panel ─────────────────────────────────── -->
+    <button id="panel-toggle" class="panel-toggle" aria-label="Settings" aria-expanded="false">
+      ⚙
+    </button>
+
+    <div id="control-panel" class="control-panel" role="dialog" aria-label="Visualizer settings">
+
+      <!-- Presets -->
+      <div class="panel-section">
+        <div class="panel-label">Preset</div>
+        <div class="btn-group">
+          <button class="preset-btn" data-preset="chill">Chill</button>
+          <button class="preset-btn" data-preset="balanced">Balanced</button>
+          <button class="preset-btn" data-preset="intense">Intense</button>
+        </div>
+      </div>
+
+      <!-- Trail length -->
+      <div class="panel-section">
+        <div class="panel-label">Trail Length</div>
+        <div class="slider-row">
+          <span class="range-cap">Long</span>
+          <input type="range" id="trail-slider"
+                 min="0.01" max="0.25" step="0.005" value="0.09"
+                 aria-label="Trail length">
+          <span class="range-cap">Short</span>
+        </div>
+      </div>
+
+      <!-- Symmetry -->
+      <div class="panel-section">
+        <div class="panel-label">Symmetry</div>
+        <div class="btn-group">
+          <button class="sym-btn" data-sym="4">4×</button>
+          <button class="sym-btn" data-sym="6">6×</button>
+          <button class="sym-btn" data-sym="8">8×</button>
+          <button class="sym-btn" data-sym="12">12×</button>
+        </div>
+      </div>
+
+      <!-- Color mode -->
+      <div class="panel-section">
+        <div class="panel-label">Color Mode</div>
+        <div class="btn-group">
+          <button class="color-btn" data-color="cycle">Cycle</button>
+          <button class="color-btn" data-color="reactive">Reactive</button>
+          <button class="color-btn" data-color="warm">Warm</button>
+          <button class="color-btn" data-color="cool">Cool</button>
+        </div>
+      </div>
+
+      <!-- Particles -->
+      <div class="panel-section">
+        <div class="panel-label">Particles</div>
+        <div class="btn-group">
+          <button class="particle-btn" data-particles="off">Off</button>
+          <button class="particle-btn" data-particles="low">Low</button>
+          <button class="particle-btn" data-particles="high">High</button>
+        </div>
+      </div>
+
+      <!-- Reactivity -->
+      <div class="panel-section">
+        <div class="panel-label">Reactivity</div>
+        <div class="slider-row">
+          <span class="range-cap">Low</span>
+          <input type="range" id="reactivity-slider"
+                 min="0.2" max="1.5" step="0.05" value="0.7"
+                 aria-label="Beat reactivity">
+          <span class="range-cap">High</span>
+        </div>
+      </div>
+
+    </div><!-- /control-panel -->
+
+    <!-- Track info — bottom-left, shown when a track is playing -->
     <div id="track-info" class="track-info hidden">
       <span id="song-name"   class="song-name"></span>
       <span id="artist-name" class="artist-name"></span>
     </div>
 
-    <!-- Shown by app.js when nothing is queued; kept minimal. -->
+    <!-- Kept for app.js compatibility; invisible in normal use -->
     <p id="not-playing" class="not-playing">Nothing playing</p>
   </div>
+
+  <!--
+    Panel script runs as a plain (non-module, non-deferred) script so it
+    executes before app.js (which is type="module" and therefore deferred),
+    guaranteeing window.VIZ_SETTINGS exists before the Visualizer constructor.
+  -->
+  <script>
+    // ── Settings state ─────────────────────────────────────────────────────────
+    const PRESETS = {
+      chill:    { fadeAlpha: 0.025, curveCount: 1, symmetry: 6,  colorMode: 'cycle',    particles: 'off',  reactivity: 0.4 },
+      balanced: { fadeAlpha: 0.09,  curveCount: 2, symmetry: 6,  colorMode: 'cycle',    particles: 'low',  reactivity: 0.7 },
+      intense:  { fadeAlpha: 0.18,  curveCount: 3, symmetry: 8,  colorMode: 'reactive', particles: 'high', reactivity: 1.0 },
+    };
+
+    // Initialise to Balanced — visualizer.js reads this object every frame.
+    window.VIZ_SETTINGS = Object.assign({}, PRESETS.balanced);
+
+    // ── DOM refs ───────────────────────────────────────────────────────────────
+    const toggle      = document.getElementById('panel-toggle');
+    const panel       = document.getElementById('control-panel');
+    const trailSlider = document.getElementById('trail-slider');
+    const reactSlider = document.getElementById('reactivity-slider');
+
+    // ── Panel open/close ───────────────────────────────────────────────────────
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = panel.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#control-panel') && !e.target.closest('#panel-toggle')) {
+        panel.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    // ── Active-state helper ────────────────────────────────────────────────────
+    function setActive(selector, attr, value) {
+      document.querySelectorAll(selector).forEach(el => {
+        el.classList.toggle('active', value != null && el.dataset[attr] === String(value));
+      });
+    }
+
+    // ── Apply preset ───────────────────────────────────────────────────────────
+    function applyPreset(name) {
+      Object.assign(window.VIZ_SETTINGS, PRESETS[name]);
+      trailSlider.value = PRESETS[name].fadeAlpha;
+      reactSlider.value = PRESETS[name].reactivity;
+      setActive('.preset-btn',   'preset',    name);
+      setActive('.sym-btn',      'sym',       PRESETS[name].symmetry);
+      setActive('.color-btn',    'color',     PRESETS[name].colorMode);
+      setActive('.particle-btn', 'particles', PRESETS[name].particles);
+    }
+
+    // Apply Balanced on load so the UI reflects the default state.
+    applyPreset('balanced');
+
+    // ── Preset buttons ─────────────────────────────────────────────────────────
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+    });
+
+    // ── Trail slider ───────────────────────────────────────────────────────────
+    trailSlider.addEventListener('input', () => {
+      window.VIZ_SETTINGS.fadeAlpha = parseFloat(trailSlider.value);
+      setActive('.preset-btn', 'preset', null); // deselect preset on manual change
+    });
+
+    // ── Symmetry buttons ───────────────────────────────────────────────────────
+    document.querySelectorAll('.sym-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.VIZ_SETTINGS.symmetry = parseInt(btn.dataset.sym, 10);
+        setActive('.sym-btn', 'sym', btn.dataset.sym);
+        setActive('.preset-btn', 'preset', null);
+      });
+    });
+
+    // ── Color mode buttons ─────────────────────────────────────────────────────
+    document.querySelectorAll('.color-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.VIZ_SETTINGS.colorMode = btn.dataset.color;
+        setActive('.color-btn', 'color', btn.dataset.color);
+        setActive('.preset-btn', 'preset', null);
+      });
+    });
+
+    // ── Particle buttons ───────────────────────────────────────────────────────
+    document.querySelectorAll('.particle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.VIZ_SETTINGS.particles = btn.dataset.particles;
+        setActive('.particle-btn', 'particles', btn.dataset.particles);
+        setActive('.preset-btn', 'preset', null);
+      });
+    });
+
+    // ── Reactivity slider ──────────────────────────────────────────────────────
+    reactSlider.addEventListener('input', () => {
+      window.VIZ_SETTINGS.reactivity = parseFloat(reactSlider.value);
+      setActive('.preset-btn', 'preset', null);
+    });
+  </script>
 
   <script type="module" src="src/app.js"></script>
 </body>

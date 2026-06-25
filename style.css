@@ -53,10 +53,7 @@ html, body {
   width: 90vw;
 }
 
-.sp-logo {
-  width: 68px;
-  height: 68px;
-}
+.sp-logo { width: 68px; height: 68px; }
 
 h1 {
   font-size: 1.85rem;
@@ -86,10 +83,7 @@ h1 {
   letter-spacing: 0.4px;
   cursor: pointer;
   margin-top: 8px;
-  transition:
-    background  0.15s ease,
-    transform   0.12s ease,
-    box-shadow  0.15s ease;
+  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
 }
 
 .btn-primary:hover {
@@ -103,7 +97,7 @@ h1 {
   box-shadow: none;
 }
 
-/* ── Visualizer canvas — fullscreen, black ────────────────────────────────── */
+/* ── Visualizer canvas ────────────────────────────────────────────────────── */
 
 #visualizer-canvas {
   position: fixed;
@@ -112,6 +106,185 @@ h1 {
   height: 100%;
   display: block;
   background: #000;
+}
+
+/* ── Settings gear button ─────────────────────────────────────────────────── */
+
+.panel-toggle {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 200;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  /* Remove browser button styling */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.panel-toggle:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.panel-toggle[aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Control panel ────────────────────────────────────────────────────────── */
+
+.control-panel {
+  position: fixed;
+  top: 58px;   /* just below the gear button */
+  left: 16px;
+  z-index: 199;
+  width: 292px;
+  background: rgba(8, 8, 8, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 4px 0;
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+
+  /* Hidden by default */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition:
+    opacity     0.22s ease,
+    transform   0.22s ease;
+}
+
+.control-panel.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+/* ── Panel sections ───────────────────────────────────────────────────────── */
+
+.panel-section {
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.panel-section:last-child {
+  border-bottom: none;
+}
+
+.panel-label {
+  font-size: 0.60rem;
+  font-weight: 600;
+  letter-spacing: 0.75px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+  margin-bottom: 7px;
+}
+
+/* ── Button groups ────────────────────────────────────────────────────────── */
+
+.btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.btn-group button {
+  padding: 4px 9px;
+  font-size: 0.72rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.13s, color 0.13s, border-color 0.13s;
+  white-space: nowrap;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.btn-group button:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.btn-group button.active {
+  background: rgba(30, 215, 96, 0.18);
+  color: #1ed760;
+  border-color: rgba(30, 215, 96, 0.45);
+}
+
+/* ── Sliders ──────────────────────────────────────────────────────────────── */
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-cap {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.32);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1ed760;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: #1ed760;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-track {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  height: 4px;
 }
 
 /* ── Track info — bottom-left ─────────────────────────────────────────────── */
@@ -124,14 +297,12 @@ h1 {
   flex-direction: column;
   gap: 4px;
   pointer-events: none;
-  /* Fade in when .hidden is removed by app.js */
   opacity: 1;
   transition: opacity 0.6s ease;
+  z-index: 10;
 }
 
-.track-info.hidden {
-  opacity: 0;
-}
+.track-info.hidden { opacity: 0; }
 
 .song-name {
   font-size: 0.88rem;
@@ -139,7 +310,7 @@ h1 {
   letter-spacing: 0.1px;
   color: rgba(255, 255, 255, 0.88);
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.95);
-  max-width: 260px;
+  max-width: 280px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -150,26 +321,24 @@ h1 {
   font-weight: 400;
   color: rgba(255, 255, 255, 0.45);
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95);
-  max-width: 260px;
+  max-width: 280px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* ── "Nothing playing" — bottom-left, very subtle ────────────────────────── */
-/* Kept in the DOM because app.js references it; kept visually minimal.       */
+/* ── "Nothing playing" — bottom-left, minimal ─────────────────────────────── */
 
 .not-playing {
   position: fixed;
   bottom: 32px;
   left: 32px;
   font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.2);
   letter-spacing: 0.2px;
   pointer-events: none;
   transition: opacity 0.5s ease;
+  z-index: 10;
 }
 
-.not-playing.hidden {
-  opacity: 0;
-}
+.not-playing.hidden { opacity: 0; }

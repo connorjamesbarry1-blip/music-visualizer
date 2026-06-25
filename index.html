@@ -38,6 +38,7 @@
   <!-- ── Visualizer screen ─────────────────────────────────────────────────── -->
   <div id="visualizer-screen" class="screen">
     <canvas id="visualizer-canvas"></canvas>
+    <canvas id="cat-canvas"></canvas>
 
     <!-- ── Settings gear + control panel ─────────────────────────────────── -->
     <button id="panel-toggle" class="panel-toggle" aria-label="Settings" aria-expanded="false">
@@ -110,6 +111,12 @@
                  aria-label="Beat reactivity">
           <span class="range-cap">High</span>
         </div>
+      </div>
+
+      <!-- Cat Mode -->
+      <div class="panel-section">
+        <div class="panel-label">Cat Mode</div>
+        <button id="cat-mode-btn" class="cat-toggle-btn">🐾 Cats: OFF</button>
       </div>
 
     </div><!-- /control-panel -->
@@ -223,6 +230,14 @@
     reactSlider.addEventListener('input', () => {
       window.VIZ_SETTINGS.reactivity = parseFloat(reactSlider.value);
       setActive('.preset-btn', 'preset', null);
+    });
+
+    // ── Cat mode button ────────────────────────────────────────────────────────
+    // toggleCatMode is defined in app.js (type="module", deferred), so it won't
+    // exist until after DOMContentLoaded. The click fires later, by which time
+    // the function is available on window.
+    document.getElementById('cat-mode-btn').addEventListener('click', () => {
+      if (window.toggleCatMode) window.toggleCatMode();
     });
   </script>
 

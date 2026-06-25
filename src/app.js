@@ -1,8 +1,10 @@
 import { redirectToSpotify, handleCallback } from './auth.js';
 import { startPolling, stopPolling } from './spotify.js';
 import { Visualizer } from './visualizer.js';
+import { CatMode } from './catmode.js';
 
 let visualizer = null;
+let catMode    = null;
 
 // ── Screen transitions ────────────────────────────────────────────────────────
 
@@ -34,6 +36,7 @@ function setTrackInfo(track) {
 function onTrackChange(track, analysis, features) {
   setTrackInfo(track);
   visualizer.setTrack(track, analysis, features);
+  catMode.onTrackChange(features);
 }
 
 function onPlaybackState(data) {
@@ -50,10 +53,45 @@ function onAuthError() {
   showScreen('login-screen');
 }
 
+// ── Cat mode toggle ───────────────────────────────────────────────────────────
+// Exposed as window.toggleCatMode so the inline panel script (which loads
+// before this module) can wire the button click.
+
+window.toggleCatMode = function () {
+  const entering  = !catMode.active;
+  const vizCanvas = document.getElementById('visualizer-canvas');
+  const catCanvas = document.getElementById('cat-canvas');
+  const btn       = document.getElementById('cat-mode-btn');
+
+  if (entering) {
+    catMode.enable();
+    vizCanvas.style.opacity       = '0';
+    catCanvas.style.opacity       = '1';
+    catCanvas.style.pointerEvents = 'auto';
+  } else {
+    catMode.disable();
+    vizCanvas.style.opacity       = '';
+    catCanvas.style.opacity       = '0';
+    catCanvas.style.pointerEvents = 'none';
+  }
+
+  if (btn) {
+    btn.textContent = entering ? '🐾 Cats: ON' : '🐾 Cats: OFF';
+    btn.classList.toggle('active', entering);
+  }
+};
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 async function init() {
-  visualizer = new Visualizer(document.getElementById('visualizer-canvas'));
+  const vizCanvas = document.getElementById('visualizer-canvas');
+  const catCanvas = document.getElementById('cat-canvas');
+
+  visualizer = new Visualizer(vizCanvas);
+  catMode    = new CatMode(catCanvas);
+
+  // Forward detected beats from the visualizer RAF loop to cat mode
+  visualizer.beatCallback = (confidence, energy) => catMode.onBeat(energy);
 
   const params = new URLSearchParams(window.location.search);
 
@@ -70,7 +108,6 @@ async function init() {
     }
   }
 
-  // Tokens are in-memory only, so every fresh page load needs a new login.
   showScreen('login-screen');
   document.getElementById('login-btn').addEventListener('click', () => {
     redirectToSpotify();

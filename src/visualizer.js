@@ -76,8 +76,9 @@ export class Visualizer {
     this.particles = [];
     this.shockwaves = [];
 
-    this._rafId  = null;
-    this._lastTs = 0;
+    this._rafId      = null;
+    this._lastTs     = 0;
+    this.beatCallback = null; // set by app.js to forward beats to CatMode
 
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
@@ -231,6 +232,8 @@ export class Visualizer {
     this.beatPulse   = Math.max(this.beatPulse,   confidence * r);
     this.curveBright = Math.min(1, confidence * r);
 
+    if (this.beatCallback) this.beatCallback(confidence, this.energy);
+
     // Reactive color mode: hue jumps ~90-190° on each beat
     if (s.colorMode === 'reactive') {
       this.hue = (this.hue + 90 + Math.random() * 100) % 360;
@@ -282,6 +285,7 @@ export class Visualizer {
 
     const isActive = !!(this.isPlaying && this.track);
     const s        = window.VIZ_SETTINGS;
+    window.VIZ_HUE = this.hue; // read by CatMode for bar colour
 
     // ── Partial fade — foundation of the trail system ─────────────────────────
     // The settings fadeAlpha is what the user controls directly.

@@ -1,12 +1,14 @@
-import { redirectToSpotify, handleCallback, getAccessToken } from './auth.js';
+import { redirectToSpotify, handleCallback } from './auth.js';
+import { getCurrentTrack } from './spotify.js';
 import { AudioEngine } from './audio.js';
 import { Visualizer } from './visualizer.js';
 import { CatMode } from './catmode.js';
 
-let audioEngine = null;
+let audioEngine = new AudioEngine();
 let visualizer  = null;
 let catMode     = null;
 let rafId       = null;
+let metaPollId  = null;
 
 // ── Screen transitions ────────────────────────────────────────────────────────
 
@@ -31,8 +33,34 @@ function setTrackInfo(track) {
   }
 }
 
+// ── Metadata poll — track name / artist via Spotify Web API ──────────────────
+
+async function pollOnce() {
+  try {
+    const data = await getCurrentTrack();
+    if (data?.item) {
+      setTrackInfo({
+        name:   data.item.name,
+        artist: data.item.artists.map(a => a.name).join(', '),
+      });
+      catMode.onTrackChange({ energy: 0.5 });
+    } else {
+      setTrackInfo(null);
+    }
+  } catch { /* transient error — next tick will retry */ }
+}
+
+function startMetadataPoll() {
+  pollOnce();
+  metaPollId = setInterval(pollOnce, 3000);
+}
+
+function stopMetadataPoll() {
+  clearInterval(metaPollId);
+  metaPollId = null;
+}
+
 // ── Cat mode toggle ───────────────────────────────────────────────────────────
-// Exposed on window so the inline panel script can wire the button click.
 
 window.toggleCatMode = function () {
   const entering  = !catMode.active;
@@ -58,31 +86,66 @@ window.toggleCatMode = function () {
   }
 };
 
-// ── Playback control delegates ────────────────────────────────────────────────
-// Panel script wires the playback bar buttons to these window functions.
-
-window.playbackPrev   = () => audioEngine?.previousTrack();
-window.playbackPlay   = () => {
-  if (!audioEngine) return;
-  if (audioEngine.isPaused) audioEngine.play();
-  else audioEngine.pause();
-};
-window.playbackNext   = () => audioEngine?.nextTrack();
-window.playbackVolume = (v) => audioEngine?.setVolume(v);
-
 // ── RAF loop ──────────────────────────────────────────────────────────────────
 
 function startRaf() {
   function loop(ts) {
     rafId = requestAnimationFrame(loop);
-    if (!audioEngine) return;
-    visualizer.draw(
-      audioEngine.getFrequencyData(),
-      audioEngine.getTimeDomainData(),
-      ts,
-    );
+    const freq  = audioEngine.getFrequencyData();
+    const time  = audioEngine.getTimeDomainData();
+    const bands = audioEngine.getBands(freq);
+    visualizer.draw(freq, time, ts, bands);
   }
   rafId = requestAnimationFrame(loop);
+}
+
+function stopRaf() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+}
+
+// ── Tab audio capture ─────────────────────────────────────────────────────────
+
+function resetCaptureBtn() {
+  const btn = document.getElementById('start-capture-btn');
+  btn.disabled    = false;
+  btn.textContent = 'Share Tab Audio';
+}
+
+async function startCapture() {
+  const btn = document.getElementById('start-capture-btn');
+  const err = document.getElementById('capture-error');
+
+  btn.disabled    = true;
+  btn.textContent = 'Opening…';
+  err.hidden      = true;
+
+  // Neutralise any previous onStopped handler before calling stop(),
+  // since track.stop() fires the ended event synchronously.
+  audioEngine.onStopped = null;
+  audioEngine.stop();
+
+  try {
+    await audioEngine.start();
+
+    audioEngine.onStopped = () => {
+      stopRaf();
+      showScreen('capture-screen');
+      resetCaptureBtn();
+    };
+
+    showScreen('visualizer-screen');
+    startRaf();
+  } catch (e) {
+    if (e.message === 'NO_AUDIO') {
+      err.textContent = 'You need to tick "Share tab audio" in the popup. Click to try again.';
+    } else if (e.name === 'NotAllowedError') {
+      err.textContent = 'Cancelled. Click to try again.';
+    } else {
+      err.textContent = `Could not start capture: ${e.message}. Click to try again.`;
+    }
+    err.hidden = false;
+    resetCaptureBtn();
+  }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -96,12 +159,19 @@ async function init() {
 
   visualizer.beatCallback = (confidence, energy) => catMode.onBeat(energy);
 
+  document.getElementById('start-capture-btn')
+    .addEventListener('click', startCapture);
+
   const params = new URLSearchParams(window.location.search);
 
   if (params.has('code') || params.has('error')) {
     try {
       const ok = await handleCallback();
-      if (ok) { await enterVisualizer(); return; }
+      if (ok) {
+        startMetadataPoll();
+        showScreen('capture-screen');
+        return;
+      }
     } catch (err) {
       console.error('Auth callback failed:', err);
     }
@@ -111,31 +181,6 @@ async function init() {
   document.getElementById('login-btn').addEventListener('click', () => {
     redirectToSpotify();
   });
-}
-
-async function enterVisualizer() {
-  showScreen('visualizer-screen');
-
-  audioEngine = new AudioEngine();
-
-  audioEngine.onTrackChange = (track) => {
-    setTrackInfo(track);
-    catMode.onTrackChange({ energy: 0.5 });
-  };
-
-  audioEngine.onPlayStateChange = (paused) => {
-    const btn = document.getElementById('pb-play');
-    if (btn) btn.textContent = paused ? '⏯' : '⏸';
-  };
-
-  try {
-    // Pass a getter so the SDK can request a fresh token at any time.
-    await audioEngine.init(() => getAccessToken());
-  } catch (err) {
-    console.error('AudioEngine init failed:', err);
-  }
-
-  startRaf();
 }
 
 document.addEventListener('DOMContentLoaded', init);

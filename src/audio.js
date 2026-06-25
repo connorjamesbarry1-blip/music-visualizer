@@ -1,138 +1,104 @@
-// Patch window.AudioContext before the Spotify SDK loads so the SDK's internal
-// AudioContext automatically exposes an AnalyserNode via window._vizAnalyser.
-const NativeAC = window.AudioContext || window.webkitAudioContext;
-
-class PatchedAudioContext extends NativeAC {
-  constructor(...args) {
-    super(...args);
-    const analyser               = this.createAnalyser();
-    analyser.fftSize             = 2048;
-    analyser.smoothingTimeConstant = 0.82;
-    const realDest               = this.destination;
-    analyser.connect(realDest);
-    Object.defineProperty(this, 'destination', { get: () => analyser });
-    window._vizAnalyser     = analyser;
-    window._vizAudioContext = this;
-  }
-}
-
-window.AudioContext = window.webkitAudioContext = PatchedAudioContext;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function binAvg(arr, start, end) {
-  let sum = 0;
-  for (let i = start; i < end; i++) sum += arr[i];
-  return sum / (end - start);
-}
-
-function loadSDK() {
-  return new Promise(resolve => {
-    window.onSpotifyWebPlaybackSDKReady = resolve;
-    const s = document.createElement('script');
-    s.src   = 'https://sdk.scdn.co/spotify-player.js';
-    document.head.appendChild(s);
-  });
-}
-
-// ── AudioEngine ───────────────────────────────────────────────────────────────
+// Tab-capture audio engine.
+// Uses getDisplayMedia to tap the rendered audio of a browser tab, then feeds
+// it into a Web Audio AnalyserNode for real-time FFT data.
+// No Spotify SDK, no DRM — we read the audio the OS already decoded.
 
 export class AudioEngine {
   constructor() {
-    this._getToken         = null;
-    this._deviceId         = null;
-    this._paused           = true;
-    this.player            = null;
-    this.onTrackChange     = null;
-    this.onPlayStateChange = null;
+    this.stream   = null;
+    this.ctx      = null;
+    this.analyser = null;
+    this.freqData = null;
+    this.timeData = null;
+    this.binWidth = 0;
+    this.ready    = false;
+    this.onStopped = null;
   }
 
-  async init(getToken) {
-    this._getToken = getToken;
-    await loadSDK();
-
-    this.player = new Spotify.Player({
-      name:          'Spotify Visualizer',
-      getOAuthToken: cb => { this._getToken().then(t => { if (t) cb(t); }); },
-      volume:        0.8,
+  async start() {
+    // getDisplayMedia requires video: true to surface the tab-audio checkbox.
+    this.stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl:  false,
+      },
     });
 
-    this.player.addListener('ready', ({ device_id }) => {
-      this._deviceId = device_id;
-      this._transferPlayback(device_id);
-    });
+    const audioTracks = this.stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      // User didn't tick "Share tab audio" — clean up and let app.js show guidance.
+      this.stream.getTracks().forEach(t => t.stop());
+      this.stream = null;
+      throw new Error('NO_AUDIO');
+    }
 
-    this.player.addListener('player_state_changed', state => {
-      if (!state) return;
-      this._paused = state.paused;
-      const tr     = state.track_window.current_track;
-      this.onTrackChange?.({
-        name:   tr.name,
-        artist: tr.artists.map(a => a.name).join(', '),
-        id:     tr.id,
-      });
-      this.onPlayStateChange?.(state.paused);
-    });
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
 
-    this.player.addListener('not_ready',           ({ device_id }) =>
-      console.warn('[AudioEngine] Device offline:', device_id));
-    this.player.addListener('initialization_error', ({ message }) =>
-      console.error('[AudioEngine] Init error:', message));
-    this.player.addListener('authentication_error', ({ message }) =>
-      console.error('[AudioEngine] Auth error:', message));
-    this.player.addListener('account_error',        ({ message }) =>
-      console.error('[AudioEngine] Premium required:', message));
+    const source   = this.ctx.createMediaStreamSource(this.stream);
+    this.analyser  = this.ctx.createAnalyser();
+    this.analyser.fftSize             = 2048;
+    this.analyser.smoothingTimeConstant = 0.80;
 
-    await this.player.connect();
+    // Connect source → analyser ONLY.
+    // Do NOT connect to ctx.destination — that would echo the audio.
+    source.connect(this.analyser);
+
+    this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
+    this.timeData = new Uint8Array(this.analyser.frequencyBinCount);
+    this.binWidth = this.ctx.sampleRate / this.analyser.fftSize;
+    this.ready    = true;
+
+    // Fire onStopped when the user clicks "Stop sharing" in the browser chrome.
+    audioTracks[0].onended = () => this.onStopped?.();
   }
-
-  // ── FFT data (called every RAF frame) ────────────────────────────────────
 
   getFrequencyData() {
-    if (!window._vizAnalyser) return new Uint8Array(1024);
-    const d = new Uint8Array(window._vizAnalyser.frequencyBinCount);
-    window._vizAnalyser.getByteFrequencyData(d);
-    return d;
+    if (!this.ready) return new Uint8Array(1024);
+    this.analyser.getByteFrequencyData(this.freqData);
+    return this.freqData;
   }
 
   getTimeDomainData() {
-    if (!window._vizAnalyser) {
+    if (!this.ready) {
       const d = new Uint8Array(1024);
-      d.fill(128); // 128 = silence in time-domain data
+      d.fill(128); // 128 = silence in time-domain encoding
       return d;
     }
-    const d = new Uint8Array(window._vizAnalyser.frequencyBinCount);
-    window._vizAnalyser.getByteTimeDomainData(d);
-    return d;
+    this.analyser.getByteTimeDomainData(this.timeData);
+    return this.timeData;
   }
 
   getBands(freqData) {
+    if (!this.ready || !this.binWidth) return { bass: 0, mid: 0, high: 0 };
+
+    const hzToBin = hz => Math.min(
+      Math.round(hz / this.binWidth),
+      freqData.length - 1
+    );
+
+    const avg = (a, b) => {
+      if (b <= a) return 0;
+      let s = 0;
+      for (let i = a; i < b; i++) s += freqData[i];
+      return s / ((b - a) * 255);
+    };
+
     return {
-      bass: binAvg(freqData, 0,  6)   / 255,
-      mid:  binAvg(freqData, 6,  94)  / 255,
-      high: binAvg(freqData, 94, 256) / 255,
+      bass: avg(hzToBin(20),   hzToBin(250)),
+      mid:  avg(hzToBin(250),  hzToBin(4000)),
+      high: avg(hzToBin(4000), hzToBin(16000)),
     };
   }
 
-  get isPaused() { return this._paused; }
-
-  // ── Playback control ──────────────────────────────────────────────────────
-
-  play()          { return this.player?.resume(); }
-  pause()         { return this.player?.pause(); }
-  nextTrack()     { return this.player?.nextTrack(); }
-  previousTrack() { return this.player?.previousTrack(); }
-  setVolume(v)    { return this.player?.setVolume(Math.max(0, Math.min(1, v))); }
-  disconnect()    { this.player?.disconnect(); }
-
-  _transferPlayback(deviceId) {
-    this._getToken().then(token => {
-      if (!token) return;
-      fetch('https://api.spotify.com/v1/me/player', {
-        method:  'PUT',
-        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ device_ids: [deviceId], play: true }),
-      }).catch(err => console.warn('[AudioEngine] Transfer error:', err));
-    });
+  stop() {
+    this.ready = false;
+    this.stream?.getTracks().forEach(t => t.stop());
+    this.ctx?.close();
+    this.stream   = null;
+    this.ctx      = null;
+    this.analyser = null;
   }
 }

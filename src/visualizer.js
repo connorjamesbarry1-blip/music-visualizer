@@ -83,14 +83,15 @@ export class Visualizer {
 
   // ── Main entry — called every RAF frame ────────────────────────────────────
 
-  draw(freqData, timeData, ts) {
+  draw(freqData, timeData, ts, externalBands) {
     const dt = Math.min((ts - this._lastTs) / 1000, 0.1);
     this._lastTs = ts;
 
     const s    = window.VIZ_SETTINGS;
     const mode = s.mode ?? 'spectrum';
 
-    const bands = {
+    // Prefer bands from the audio engine (Hz-accurate); fall back to bin-range estimate.
+    const bands = externalBands ?? {
       bass: avgRange(freqData, 0,  6)   / 255,
       mid:  avgRange(freqData, 6,  94)  / 255,
       high: avgRange(freqData, 94, 256) / 255,

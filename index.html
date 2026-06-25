@@ -35,6 +35,24 @@
     </div>
   </div>
 
+  <!-- ── Capture / share-audio prompt ─────────────────────────────────────── -->
+  <div id="capture-screen" class="screen">
+    <div class="capture-card">
+      <div class="capture-icon">🎵</div>
+      <h2 class="capture-title">Start Visualizer</h2>
+      <ol class="capture-steps">
+        <li>Open Spotify in another tab and start playing</li>
+        <li>Click the button below</li>
+        <li>Select that tab, then tick <strong>Share tab audio</strong></li>
+      </ol>
+      <button id="start-capture-btn" class="btn-primary" type="button">
+        Share Tab Audio
+      </button>
+      <p id="capture-error" class="capture-error" hidden></p>
+      <p class="capture-note">Chrome recommended — Firefox and Safari do not support tab audio capture.</p>
+    </div>
+  </div>
+
   <!-- ── Visualizer screen ─────────────────────────────────────────────────── -->
   <div id="visualizer-screen" class="screen">
     <canvas id="visualizer-canvas"></canvas>
@@ -143,21 +161,6 @@
     <!-- Kept for app.js compatibility; invisible in normal use -->
     <p id="not-playing" class="not-playing">Nothing playing</p>
 
-    <!-- Playback controls — hover the transparent area to reveal -->
-    <div id="playback-wrap">
-      <div class="playback-controls">
-        <button class="pb-btn" id="pb-prev">⏮</button>
-        <button class="pb-btn pb-play" id="pb-play">⏯</button>
-        <button class="pb-btn" id="pb-next">⏭</button>
-        <div class="pb-volume">
-          <span class="pb-icon">🔈</span>
-          <input type="range" id="volume-slider" class="pb-vol-slider"
-                 min="0" max="1" step="0.01" value="0.8"
-                 aria-label="Volume">
-          <span class="pb-icon">🔊</span>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!--
@@ -269,14 +272,6 @@
         window.VIZ_SETTINGS.mode = btn.dataset.mode;
         setActive('.mode-btn', 'mode', btn.dataset.mode);
       });
-    });
-
-    // ── Playback controls bar ──────────────────────────────────────────────────
-    document.getElementById('pb-prev').addEventListener('click', () => window.playbackPrev?.());
-    document.getElementById('pb-play').addEventListener('click', () => window.playbackPlay?.());
-    document.getElementById('pb-next').addEventListener('click', () => window.playbackNext?.());
-    document.getElementById('volume-slider').addEventListener('input', function () {
-      window.playbackVolume?.(parseFloat(this.value));
     });
 
     // ── Cat mode button ────────────────────────────────────────────────────────

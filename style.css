@@ -388,76 +388,62 @@ input[type="range"]::-moz-range-track {
   border-color: rgba(255, 175, 30, 0.45);
 }
 
-/* ── Playback controls bar ─────────────────────────────────────────────────── */
+/* ── Capture / share-audio prompt card ────────────────────────────────────── */
 
-#playback-wrap {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
-  padding-top: 48px; /* transparent hover trigger area above the bar */
-  pointer-events: auto;
-}
-
-#playback-wrap .playback-controls {
+.capture-card {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 8px 24px 10px;
-  background: rgba(8, 8, 8, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-bottom: none;
-  border-radius: 12px 12px 0 0;
+  gap: 18px;
+  text-align: center;
+  padding: 48px 44px 40px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  opacity: 0;
-  transition: opacity 0.22s ease;
-  white-space: nowrap;
+  max-width: 400px;
+  width: 90vw;
 }
 
-#playback-wrap:hover .playback-controls {
-  opacity: 1;
-}
-
-.pb-btn {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 1.15rem;
-  cursor: pointer;
-  padding: 5px 10px;
-  border-radius: 6px;
+.capture-icon {
+  font-size: 2.4rem;
   line-height: 1;
-  transition: color 0.14s, background 0.14s;
-  -webkit-appearance: none;
-  appearance: none;
 }
 
-.pb-btn:hover {
+.capture-title {
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.capture-steps {
+  text-align: left;
+  color: rgba(255, 255, 255, 0.70);
+  font-size: 0.90rem;
+  line-height: 1.7;
+  padding-left: 1.4em;
+  margin: 0;
+  list-style: decimal;
+}
+
+.capture-steps strong {
   color: #fff;
-  background: rgba(255, 255, 255, 0.10);
+  font-weight: 600;
 }
 
-.pb-play {
-  font-size: 1.35rem;
-  padding: 5px 13px;
+.capture-error {
+  color: #ff6b6b;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  max-width: 320px;
+  margin: 0;
 }
 
-.pb-volume {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-left: 8px;
-}
-
-.pb-icon {
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.35);
-  line-height: 1;
-}
-
-.pb-vol-slider {
-  flex: none;
-  width: 76px;
+.capture-note {
+  color: rgba(255, 255, 255, 0.26);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  max-width: 300px;
+  margin: 0;
 }

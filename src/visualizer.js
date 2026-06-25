@@ -1,19 +1,15 @@
-// ── Constants ─────────────────────────────────────────────────────────────────
+// iTunes-style abstract music visualizer
+// Technique: partial-fade canvas (no full clear) so every drawn element
+// leaves a decaying trail automatically — no explicit trail bookkeeping.
 
-const BAR_COUNT   = 80;
-const BAR_MIN     = 4;
-const BAR_MAX     = 130;
-const ART_RADIUS  = 110;              // album art circle radius (px)
-const BAR_INNER   = ART_RADIUS + 18; // bars radiate outward from this radius
-const BAR_WIDTH   = 3;
-const DEFAULT_HUE = 141;             // Spotify green starting hue
+const TWO_PI        = Math.PI * 2;
+const SYMMETRY      = 6;          // kaleidoscope fold count
+const CURVE_STEPS   = 1500;       // parametric resolution per Lissajous curve
+const CURVE_PERIOD  = Math.PI * 10; // 5 full parametric cycles → complex patterns
+const MAX_PARTICLES = 450;
 
-// ── Small utilities ───────────────────────────────────────────────────────────
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
-/**
- * Return the index of the last item whose .start <= positionSeconds.
- * Used to find the current beat / bar / section.
- */
 function findCurrentIndex(items, posSec) {
   if (!items?.length) return -1;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -31,51 +27,49 @@ export class Visualizer {
     this.canvas = canvas;
     this.ctx    = canvas.getContext('2d');
 
-    // Current track data
+    // Spotify data
     this.track    = null;
-    this.analysis = null;   // from /audio-analysis — may be null (non-premium)
-    this.features = null;   // from /audio-features
+    this.analysis = null;
+    this.features = null;
 
-    // Album art
-    this.artImage = null;
-    this.artUrl   = null;
-
-    // Playback position reference — updated every poll cycle (every 2 s).
-    // Between updates we advance by wall-clock time.
+    // Playback sync — progressMs is set on every poll; we interpolate between polls.
     this.progressMs = 0;
-    this.syncedAt   = 0;    // performance.now() value when progressMs was set
+    this.syncedAt   = performance.now();
     this.isPlaying  = false;
 
-    // Beat animation
-    this.beatPulse    = 0;  // 0–1, decays over time
+    // Beat state
     this.lastBeatIdx  = -1;
-    this.lastBarIdx   = -1;
     this.lastSectIdx  = -1;
+    this.lastSynthBeat = -1;  // beat index for synthetic (non-premium) detection
+    this.beatPulse    = 0;    // 0–1, decays each frame
+    this.curveBright  = 0;    // brief boost to curve brightness on beat
 
-    // Per-bar random seeds — stable per Visualizer instance, refreshed on
-    // new track so the pattern changes between songs.
-    this.barFreq      = new Float32Array(BAR_COUNT);
-    this.barPhase     = new Float32Array(BAR_COUNT);
-    this.barVariation = new Float32Array(BAR_COUNT);
-    this._seedBars();
+    // Audio-visual params (set from features, updated on track change)
+    this.energy    = 0.35;
+    this.valence   = 0.5;
+    this.sectionIntensity       = 0.7;
+    this.targetSectionIntensity = 0.7;
 
-    // Smoothed heights (actual) vs targets
-    this.barHeights = new Float32Array(BAR_COUNT).fill(BAR_MIN);
-    this.barTargets = new Float32Array(BAR_COUNT).fill(BAR_MIN);
+    // Hue — cycles continuously, shifted by valence
+    this.hue = Math.random() * 360;
 
-    // Expanding ring pulses spawned on each beat: [{ r, opacity, hue }]
-    this.rings = [];
+    // Three Lissajous curves with slowly drifting parameters.
+    // x(t) = amp * sin(a*t + phase),  y(t) = amp * sin(b*t)
+    // aRate / bRate: how fast a and b drift (units / second); reversed at bounds.
+    this.curves = [
+      { a: 3.0, b: 2.0, phase: 0,            phaseSpeed:  0.40, aRate:  0.10, bRate:  0.08 },
+      { a: 5.0, b: 4.0, phase: TWO_PI / 3,   phaseSpeed: -0.32, aRate: -0.08, bRate:  0.11 },
+      { a: 7.0, b: 6.0, phase: TWO_PI * 2/3, phaseSpeed:  0.25, aRate:  0.06, bRate: -0.09 },
+    ];
 
-    // Smoothly-interpolated colour values
-    this.hue          = DEFAULT_HUE;
-    this.targetHue    = DEFAULT_HUE;
-    this.saturation   = 70;
-    this.targetSat    = 70;
-    this.bgLightness  = 5;
-    this.targetBgL    = 5;
+    // Particles — live positions (kaleidoscope handles visual copies)
+    this.particles = [];
 
-    this._rafId   = null;
-    this._lastTs  = 0;
+    // Shockwave rings spawned on each beat
+    this.shockwaves = [];
+
+    this._rafId  = null;
+    this._lastTs = 0;
 
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
@@ -84,55 +78,34 @@ export class Visualizer {
 
   // ── Public interface ────────────────────────────────────────────────────────
 
-  /**
-   * Call when the playing track changes (including when nothing is playing).
-   * track / analysis / features may all be null.
-   */
   setTrack(track, analysis, features) {
     this.track    = track;
     this.analysis = analysis;
     this.features = features;
 
-    // Reset beat state for the new track
-    this.beatPulse   = 0;
     this.lastBeatIdx = -1;
-    this.lastBarIdx  = -1;
     this.lastSectIdx = -1;
-    this.rings       = [];
+    this.shockwaves  = [];
 
-    this._seedBars(); // fresh random per-bar variation
-
-    // Derive target colours from audio features
-    if (features) {
-      // valence (happiness) → hue: 0 = blue/sad (240°), 1 = yellow/happy (60°)
-      this.targetHue = 240 - features.valence * 180;
-      // energy → saturation and background darkness
-      this.targetSat = 40 + features.energy * 55;
-      this.targetBgL = 4  + features.energy * 6;
+    // Seed synthetic-beat tracker at current position to avoid a spurious
+    // immediate fire the first time _update runs after a track change.
+    if (features?.tempo && track) {
+      const period = 60 / features.tempo;
+      this.lastSynthBeat = Math.floor(this._posMs() / 1000 / period);
     } else {
-      this.targetHue = DEFAULT_HUE;
-      this.targetSat = 70;
-      this.targetBgL = 5;
+      this.lastSynthBeat = -1;
     }
 
-    // Load album art (only when the URL actually changes)
-    const url = track?.album?.images?.[0]?.url ?? null;
-    if (url !== this.artUrl) {
-      this.artUrl   = url;
-      this.artImage = null;
-      if (url) {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => { this.artImage = img; };
-        img.src = url;
-      }
+    if (features) {
+      this.energy  = features.energy;
+      this.valence = features.valence;
+    } else if (!track) {
+      // Idle: soft defaults
+      this.energy  = 0.3;
+      this.valence = 0.5;
     }
   }
 
-  /**
-   * Called every poll cycle to keep our playback position in sync.
-   * Between calls we interpolate using wall-clock time.
-   */
   updatePlayback(progressMs, isPlaying) {
     this.progressMs = progressMs;
     this.syncedAt   = performance.now();
@@ -158,15 +131,7 @@ export class Visualizer {
     this.canvas.height = window.innerHeight;
   }
 
-  _seedBars() {
-    for (let i = 0; i < BAR_COUNT; i++) {
-      this.barFreq[i]      = 0.3 + Math.random() * 0.8;  // 0.3–1.1 Hz ambient sway
-      this.barPhase[i]     = Math.random() * Math.PI * 2;
-      this.barVariation[i] = 0.5 + Math.random() * 0.5;  // relative spike height
-    }
-  }
-
-  /** Estimated current playback position in milliseconds. */
+  /** Estimated playback position in ms, interpolated since last poll. */
   _posMs() {
     if (!this.isPlaying) return this.progressMs;
     return this.progressMs + (performance.now() - this.syncedAt);
@@ -174,205 +139,218 @@ export class Visualizer {
 
   _loop(ts) {
     this._rafId = requestAnimationFrame(t => this._loop(t));
-    const dt = Math.min((ts - this._lastTs) / 1000, 0.1); // seconds; cap at 100 ms
+    const dt = Math.min((ts - this._lastTs) / 1000, 0.1); // cap at 100 ms
     this._lastTs = ts;
-    this._update(dt, ts);
+    this._update(dt);
     this._draw();
   }
 
-  _update(dt, ts) {
-    const posSec = this._posMs() / 1000;
-    const tWall  = ts / 1000; // wall-clock seconds (for ambient oscillation)
+  _update(dt) {
+    const isActive = !!(this.isPlaying && this.track);
+    const posSec   = this._posMs() / 1000;
 
-    // ── Beat detection (from audio analysis or synthetic fallback) ────────────
+    // ── Hue cycling ──────────────────────────────────────────────────────────
+    // Faster when something energetic is playing.
+    const hueSpeed = isActive ? 18 + this.energy * 15 : 5;
+    this.hue = (this.hue + hueSpeed * dt) % 360;
 
-    if (this.analysis?.beats && this.isPlaying) {
+    // ── Beat detection from Spotify audio analysis ────────────────────────────
+    if (isActive && this.analysis?.beats) {
       const idx = findCurrentIndex(this.analysis.beats, posSec);
-
       if (idx >= 0 && idx !== this.lastBeatIdx) {
         this.lastBeatIdx = idx;
-        const beat = this.analysis.beats[idx];
-
-        // Pulse strength is scaled by the beat's own confidence value
-        this.beatPulse = Math.max(this.beatPulse, beat.confidence);
-
-        // Spawn an expanding ring at the art boundary
-        this.rings.push({ r: BAR_INNER, opacity: 0.75, hue: this.hue });
-      }
-
-    } else if (this.features?.tempo && this.isPlaying) {
-      // Synthetic beat for non-premium users (no audio analysis available)
-      const period    = 60 / this.features.tempo;
-      const beatPhase = (posSec % period) / period;
-      if (beatPhase < 0.06) {
-        const pulse = this.features.energy * (1 - beatPhase / 0.06);
-        if (pulse > this.beatPulse) {
-          this.beatPulse = pulse;
-          this.rings.push({ r: BAR_INNER, opacity: 0.5, hue: this.hue });
-        }
+        this._onBeat(this.analysis.beats[idx].confidence);
       }
     }
 
-    // ── Bar-level colour shift (each bar ≈ one measure) ──────────────────────
-
-    if (this.analysis?.bars) {
-      const idx = findCurrentIndex(this.analysis.bars, posSec);
-      if (idx >= 0 && idx !== this.lastBarIdx) {
-        this.lastBarIdx = idx;
-        // Nothing extra needed — beat handling above covers the animation.
+    // ── Synthetic beats for non-premium accounts (no audio analysis) ──────────
+    if (isActive && !this.analysis && this.features?.tempo) {
+      const period   = 60 / this.features.tempo;
+      const beatIdx  = Math.floor(posSec / period);
+      if (beatIdx !== this.lastSynthBeat) {
+        this.lastSynthBeat = beatIdx;
+        this._onBeat(0.65 + this.energy * 0.25);
       }
     }
 
-    // ── Section-level background shift ───────────────────────────────────────
-
-    if (this.analysis?.sections) {
+    // ── Section intensity from loudness_max ───────────────────────────────────
+    if (isActive && this.analysis?.sections) {
       const idx = findCurrentIndex(this.analysis.sections, posSec);
       if (idx >= 0 && idx !== this.lastSectIdx) {
         this.lastSectIdx = idx;
         const sec       = this.analysis.sections[idx];
-        // loudness_max runs roughly −60 to 0 dB; map to 0–1 intensity
+        // loudness_max runs roughly −60 dB (silent) to 0 dB (loud)
         const intensity = Math.min(1, Math.max(0, (sec.loudness_max + 60) / 60));
-        this.targetBgL  = 3 + intensity * 10;
+        this.targetSectionIntensity = 0.4 + intensity * 0.6;
       }
     }
 
-    // ── Decay beat pulse ──────────────────────────────────────────────────────
-    this.beatPulse = Math.max(0, this.beatPulse - dt * 5);
+    this.sectionIntensity = lerp(this.sectionIntensity, this.targetSectionIntensity, dt * 0.4);
 
-    // ── Advance / cull rings ──────────────────────────────────────────────────
-    const ringMax = BAR_INNER + BAR_MAX + 70;
-    for (let i = this.rings.length - 1; i >= 0; i--) {
-      const ring = this.rings[i];
-      ring.r       += dt * 230;
-      ring.opacity -= dt * 2.2;
-      if (ring.opacity <= 0 || ring.r > ringMax) this.rings.splice(i, 1);
+    // ── Decay per-beat values ─────────────────────────────────────────────────
+    this.beatPulse   = Math.max(0, this.beatPulse   - dt * 4.5);
+    this.curveBright = Math.max(0, this.curveBright - dt * 2.5);
+
+    // ── Drift Lissajous frequency params ─────────────────────────────────────
+    for (const c of this.curves) {
+      c.phase += c.phaseSpeed * dt;
+      c.a     += c.aRate * dt;
+      c.b     += c.bRate * dt;
+      // Bounce at bounds to keep patterns interesting and avoid degeneracy
+      if (c.a > 7.5 || c.a < 1.5) c.aRate *= -1;
+      if (c.b > 6.5 || c.b < 1.5) c.bRate *= -1;
     }
 
-    // ── Bar target heights ────────────────────────────────────────────────────
-    for (let i = 0; i < BAR_COUNT; i++) {
-      // Gentle organic ambient sway — each bar at its own frequency / phase
-      const ambient = 5 + 9 * (Math.sin(tWall * this.barFreq[i] + this.barPhase[i]) * 0.5 + 0.5);
-
-      // Beat spike — each bar has slightly different height via barVariation
-      const spike = (BAR_MAX - BAR_MIN) * this.beatPulse * this.barVariation[i];
-
-      this.barTargets[i] = BAR_MIN + ambient + spike;
+    // ── Particles ─────────────────────────────────────────────────────────────
+    // Frame-rate-independent drag: velocity multiplied by (drag)^(dt*60) each frame.
+    const drag = Math.pow(0.92, dt * 60);
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p  = this.particles[i];
+      p.x     += p.vx * dt;
+      p.y     += p.vy * dt;
+      p.vx    *= drag;
+      p.vy    *= drag;
+      p.life  -= p.decay * dt;
+      if (p.life <= 0) this.particles.splice(i, 1);
     }
 
-    // ── Smooth bar heights toward targets ─────────────────────────────────────
-    const lerpT = Math.min(1, dt * 10);
-    for (let i = 0; i < BAR_COUNT; i++) {
-      this.barHeights[i] = lerp(this.barHeights[i], this.barTargets[i], lerpT);
+    // ── Shockwaves ────────────────────────────────────────────────────────────
+    for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+      const sw     = this.shockwaves[i];
+      sw.r        += sw.speed * dt;
+      sw.opacity  -= dt * 1.8;
+      if (sw.opacity <= 0) this.shockwaves.splice(i, 1);
+    }
+  }
+
+  _onBeat(confidence) {
+    this.beatPulse   = Math.max(this.beatPulse,   confidence);
+    this.curveBright = confidence;
+
+    // Only burst particles when actively playing (not in idle mode)
+    if (this.isPlaying && this.track) {
+      const count = Math.floor(28 + confidence * 20 + this.energy * 12);
+      this._spawnParticles(count);
     }
 
-    // ── Smooth colour transitions ─────────────────────────────────────────────
-    const cLerp = Math.min(1, dt * 0.8);
-    this.hue         = lerp(this.hue,         this.targetHue, cLerp);
-    this.saturation  = lerp(this.saturation,  this.targetSat, cLerp);
-    this.bgLightness = lerp(this.bgLightness, this.targetBgL, cLerp);
+    // Shockwave ring — expands and fades over ~0.5 s
+    this.shockwaves.push({
+      r:       0,
+      speed:   260 + this.energy * 190,
+      opacity: 0.78 * confidence,
+      hue:     this.hue,
+    });
+  }
+
+  _spawnParticles(count) {
+    const available = MAX_PARTICLES - this.particles.length;
+    if (available <= 0) return;
+    const n = Math.min(count, available);
+
+    for (let i = 0; i < n; i++) {
+      const angle = Math.random() * TWO_PI;
+      const speed = 65 + Math.random() * 210 * (0.4 + this.energy * 0.6);
+      this.particles.push({
+        x:     0,
+        y:     0,
+        vx:    Math.cos(angle) * speed,
+        vy:    Math.sin(angle) * speed,
+        life:  1,
+        decay: 0.38 + Math.random() * 0.48,
+        size:  1.4 + Math.random() * 3.0,
+        hue:   (this.hue + (Math.random() - 0.5) * 70 + 360) % 360,
+      });
+    }
   }
 
   _draw() {
-    const { ctx, canvas, hue, saturation, bgLightness, beatPulse } = this;
+    const { ctx, canvas } = this;
     const W  = canvas.width;
     const H  = canvas.height;
     const cx = W / 2;
     const cy = H / 2;
 
-    // ── Background ────────────────────────────────────────────────────────────
-    ctx.fillStyle = `hsl(${hue}, 15%, ${bgLightness}%)`;
+    const isActive = !!(this.isPlaying && this.track);
+
+    // ── Partial fade — the core of the trail system ───────────────────────────
+    // Instead of clearing the canvas, we lay a semi-transparent black over it.
+    // Everything drawn this frame persists into the next, fading by `fadeAlpha`
+    // each frame. High energy → faster fade → snappier short trails.
+    const fadeAlpha = isActive ? 0.042 + this.energy * 0.065 : 0.025;
+    ctx.fillStyle   = `rgba(0, 0, 0, ${fadeAlpha})`;
     ctx.fillRect(0, 0, W, H);
 
-    // Subtle warm radial bloom from centre
-    const bloom = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.65);
-    bloom.addColorStop(0, `hsla(${hue}, 35%, ${bgLightness + 7}%, 0.4)`);
-    bloom.addColorStop(1, 'transparent');
-    ctx.fillStyle = bloom;
-    ctx.fillRect(0, 0, W, H);
+    // ── Derived colour values ─────────────────────────────────────────────────
+    // Valence: positive → warmer (+50° toward yellow/orange)
+    //          negative → cooler (−50° toward blue/purple)
+    const valenceShift = (this.valence - 0.5) * 100;
+    const dHue = (this.hue + valenceShift + 360) % 360;
 
-    // ── Radial bars ───────────────────────────────────────────────────────────
-    const barLightness = 45 + beatPulse * 22;
-    const barAlpha     = 0.78 + beatPulse * 0.17;
+    // Amplitude: fraction of the shorter screen dimension
+    const baseR = Math.min(W, H) * 0.40;
+    const amp   = baseR * (isActive
+      ? (0.55 + this.energy * 0.45) * this.sectionIntensity
+      : 0.30);
 
+    // Saturation and lightness driven by energy, boosted briefly on beat
+    const sat       = isActive ? 55 + this.energy * 40 : 28;
+    const light     = isActive ? 36 + this.energy * 22 + this.curveBright * 26 : 20;
+    const cAlpha    = isActive ? 0.48 + this.curveBright * 0.34 : 0.24;
+    const lineWidth = 1.3 + this.beatPulse * 2.2;
+
+    // ── Kaleidoscope: draw into SYMMETRY rotated + mirrored slices ─────────────
+    // All drawing is done in canvas-space centred on (cx, cy).
+    // Alternating slices are reflected on the Y axis — this gives a true mirror
+    // effect rather than pure rotation, matching the classic iTunes look.
     ctx.save();
     ctx.translate(cx, cy);
 
-    for (let i = 0; i < BAR_COUNT; i++) {
-      const angle     = (i / BAR_COUNT) * Math.PI * 2 - Math.PI / 2;
-      const h         = this.barHeights[i];
-      const hueShift  = (i / BAR_COUNT) * 28 - 14; // ±14° shimmer across the ring
-
+    for (let sym = 0; sym < SYMMETRY; sym++) {
       ctx.save();
-      ctx.rotate(angle);
+      ctx.rotate((sym / SYMMETRY) * TWO_PI);
+      if (sym % 2 === 1) ctx.scale(1, -1);
 
-      // Gradient: solid at root, fades at tip
-      const grad = ctx.createLinearGradient(0, BAR_INNER, 0, BAR_INNER + h);
-      grad.addColorStop(0,   `hsla(${hue + hueShift},      ${saturation}%,      ${barLightness}%,      ${barAlpha})`);
-      grad.addColorStop(0.6, `hsla(${hue + hueShift + 12}, ${saturation + 8}%,  ${barLightness + 12}%, ${barAlpha * 0.55})`);
-      grad.addColorStop(1,   `hsla(${hue + hueShift + 25}, ${saturation}%,      ${barLightness + 20}%, 0)`);
+      // ── Three Lissajous curves ──────────────────────────────────────────────
+      // Each rendered at a 45° hue offset for harmonic colour spread.
+      this.curves.forEach((c, ci) => {
+        const cHue = (dHue + ci * 45) % 360;
 
-      ctx.fillStyle = grad;
-      ctx.fillRect(-BAR_WIDTH / 2, BAR_INNER, BAR_WIDTH, h);
+        ctx.beginPath();
+        for (let i = 0; i <= CURVE_STEPS; i++) {
+          const t = (i / CURVE_STEPS) * CURVE_PERIOD;
+          const x = amp * Math.sin(c.a * t + c.phase);
+          const y = amp * Math.sin(c.b * t);
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = `hsla(${cHue}, ${sat}%, ${light}%, ${cAlpha})`;
+        ctx.lineWidth   = lineWidth;
+        ctx.stroke();
+      });
+
+      // ── Particles ───────────────────────────────────────────────────────────
+      // Each particle lives at one (x,y); the kaleidoscope loop renders SYMMETRY
+      // rotated copies automatically. Trails are left by the canvas fade above.
+      const pLight = 58 + this.energy * 22;
+      for (const p of this.particles) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, TWO_PI);
+        ctx.fillStyle = `hsla(${p.hue}, 88%, ${pLight}%, ${p.life * 0.92})`;
+        ctx.fill();
+      }
 
       ctx.restore();
     }
 
-    ctx.restore();
+    ctx.restore(); // remove the centre translation
 
-    // ── Expanding beat rings ──────────────────────────────────────────────────
-    for (const ring of this.rings) {
+    // ── Shockwave rings ───────────────────────────────────────────────────────
+    // Drawn directly in screen space — they're already circles, no need to
+    // replicate them through the kaleidoscope.
+    for (const sw of this.shockwaves) {
       ctx.beginPath();
-      ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
-      ctx.strokeStyle = `hsla(${ring.hue}, ${saturation + 20}%, 72%, ${ring.opacity})`;
-      ctx.lineWidth   = 2;
-      ctx.stroke();
-    }
-
-    // ── Glow halo around the art circle ──────────────────────────────────────
-    const glowA   = 0.28 + beatPulse * 0.48;
-    const glowOut = ctx.createRadialGradient(cx, cy, ART_RADIUS - 6, cx, cy, ART_RADIUS + 44);
-    glowOut.addColorStop(0, `hsla(${hue}, ${saturation + 20}%, 68%, ${glowA})`);
-    glowOut.addColorStop(1, 'transparent');
-    ctx.fillStyle = glowOut;
-    ctx.beginPath();
-    ctx.arc(cx, cy, ART_RADIUS + 44, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ── Album art circle ──────────────────────────────────────────────────────
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, ART_RADIUS, 0, Math.PI * 2);
-    ctx.clip();
-
-    if (this.artImage) {
-      ctx.drawImage(
-        this.artImage,
-        cx - ART_RADIUS, cy - ART_RADIUS,
-        ART_RADIUS * 2,  ART_RADIUS * 2,
-      );
-    } else {
-      // Placeholder: gradient disc with a music note
-      const disc = ctx.createRadialGradient(cx, cy, 0, cx, cy, ART_RADIUS);
-      disc.addColorStop(0, `hsl(${hue}, 28%, 22%)`);
-      disc.addColorStop(1, `hsl(${hue}, 22%, 10%)`);
-      ctx.fillStyle = disc;
-      ctx.fillRect(cx - ART_RADIUS, cy - ART_RADIUS, ART_RADIUS * 2, ART_RADIUS * 2);
-
-      ctx.fillStyle    = `hsla(${hue}, 40%, 65%, 0.3)`;
-      ctx.font         = `${ART_RADIUS * 0.58}px serif`;
-      ctx.textAlign    = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('♪', cx, cy);
-    }
-
-    ctx.restore();
-
-    // Beat shimmer on art border
-    if (beatPulse > 0.04) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, ART_RADIUS, 0, Math.PI * 2);
-      ctx.strokeStyle = `hsla(${hue}, 90%, 88%, ${beatPulse * 0.5})`;
-      ctx.lineWidth   = 4;
+      ctx.arc(cx, cy, sw.r, 0, TWO_PI);
+      ctx.strokeStyle = `hsla(${sw.hue}, 90%, 76%, ${sw.opacity})`;
+      ctx.lineWidth   = 2.5;
       ctx.stroke();
     }
   }

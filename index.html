@@ -12,7 +12,6 @@
   <div id="login-screen" class="screen active">
     <div class="login-card">
 
-      <!-- Official Spotify logo SVG (no external request) -->
       <svg class="sp-logo" viewBox="0 0 168 168" aria-hidden="true" focusable="false">
         <path fill="#1ED760" d="
           M84 0C37.6 0 0 37.6 0 84s37.6 84 84 84 84-37.6 84-84S130.4 0 84 0z
@@ -40,14 +39,14 @@
   <div id="visualizer-screen" class="screen">
     <canvas id="visualizer-canvas"></canvas>
 
-    <!-- Bottom-centre overlay: song name + artist -->
+    <!-- Bottom-left: song name + artist. Hidden until a track is playing. -->
     <div id="track-info" class="track-info hidden">
       <span id="song-name"   class="song-name"></span>
       <span id="artist-name" class="artist-name"></span>
     </div>
 
-    <!-- Shown when Spotify has nothing queued / player is closed -->
-    <p id="not-playing" class="not-playing">Nothing playing right now</p>
+    <!-- Shown by app.js when nothing is queued; kept minimal. -->
+    <p id="not-playing" class="not-playing">Nothing playing</p>
   </div>
 
   <script type="module" src="src/app.js"></script>

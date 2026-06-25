@@ -106,6 +106,7 @@ h1 {
   height: 100%;
   display: block;
   background: #000;
+  transition: opacity 0.6s ease;
 }
 
 /* ── Settings gear button ─────────────────────────────────────────────────── */
@@ -385,4 +386,78 @@ input[type="range"]::-moz-range-track {
   background: rgba(255, 175, 30, 0.18);
   color: #ffbb44;
   border-color: rgba(255, 175, 30, 0.45);
+}
+
+/* ── Playback controls bar ─────────────────────────────────────────────────── */
+
+#playback-wrap {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  padding-top: 48px; /* transparent hover trigger area above the bar */
+  pointer-events: auto;
+}
+
+#playback-wrap .playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px 10px;
+  background: rgba(8, 8, 8, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-bottom: none;
+  border-radius: 12px 12px 0 0;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  white-space: nowrap;
+}
+
+#playback-wrap:hover .playback-controls {
+  opacity: 1;
+}
+
+.pb-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 1.15rem;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: color 0.14s, background 0.14s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.pb-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.pb-play {
+  font-size: 1.35rem;
+  padding: 5px 13px;
+}
+
+.pb-volume {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 8px;
+}
+
+.pb-icon {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.35);
+  line-height: 1;
+}
+
+.pb-vol-slider {
+  flex: none;
+  width: 76px;
 }

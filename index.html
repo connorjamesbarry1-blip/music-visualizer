@@ -57,6 +57,19 @@
         </div>
       </div>
 
+      <!-- Visualization Mode -->
+      <div class="panel-section">
+        <div class="panel-label">Mode</div>
+        <div class="btn-group">
+          <button class="mode-btn" data-mode="spectrum">Spectrum</button>
+          <button class="mode-btn" data-mode="waveform">Waveform</button>
+          <button class="mode-btn" data-mode="radial">Radial</button>
+          <button class="mode-btn" data-mode="terrain">Terrain</button>
+          <button class="mode-btn" data-mode="particles">Particles</button>
+          <button class="mode-btn" data-mode="lissajous">Lissajous</button>
+        </div>
+      </div>
+
       <!-- Trail length -->
       <div class="panel-section">
         <div class="panel-label">Trail Length</div>
@@ -129,6 +142,22 @@
 
     <!-- Kept for app.js compatibility; invisible in normal use -->
     <p id="not-playing" class="not-playing">Nothing playing</p>
+
+    <!-- Playback controls — hover the transparent area to reveal -->
+    <div id="playback-wrap">
+      <div class="playback-controls">
+        <button class="pb-btn" id="pb-prev">⏮</button>
+        <button class="pb-btn pb-play" id="pb-play">⏯</button>
+        <button class="pb-btn" id="pb-next">⏭</button>
+        <div class="pb-volume">
+          <span class="pb-icon">🔈</span>
+          <input type="range" id="volume-slider" class="pb-vol-slider"
+                 min="0" max="1" step="0.01" value="0.8"
+                 aria-label="Volume">
+          <span class="pb-icon">🔊</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!--
@@ -187,6 +216,8 @@
 
     // Apply Balanced on load so the UI reflects the default state.
     applyPreset('balanced');
+    window.VIZ_SETTINGS.mode = 'spectrum';
+    setActive('.mode-btn', 'mode', 'spectrum');
 
     // ── Preset buttons ─────────────────────────────────────────────────────────
     document.querySelectorAll('.preset-btn').forEach(btn => {
@@ -230,6 +261,22 @@
     reactSlider.addEventListener('input', () => {
       window.VIZ_SETTINGS.reactivity = parseFloat(reactSlider.value);
       setActive('.preset-btn', 'preset', null);
+    });
+
+    // ── Mode buttons ───────────────────────────────────────────────────────────
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.VIZ_SETTINGS.mode = btn.dataset.mode;
+        setActive('.mode-btn', 'mode', btn.dataset.mode);
+      });
+    });
+
+    // ── Playback controls bar ──────────────────────────────────────────────────
+    document.getElementById('pb-prev').addEventListener('click', () => window.playbackPrev?.());
+    document.getElementById('pb-play').addEventListener('click', () => window.playbackPlay?.());
+    document.getElementById('pb-next').addEventListener('click', () => window.playbackNext?.());
+    document.getElementById('volume-slider').addEventListener('input', function () {
+      window.playbackVolume?.(parseFloat(this.value));
     });
 
     // ── Cat mode button ────────────────────────────────────────────────────────

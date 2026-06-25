@@ -358,6 +358,12 @@ input[type="range"]::-moz-range-track {
   z-index: 4; /* above visualizer canvas, below track info (z-index: 10) */
 }
 
+/* ── Cat count label (secondary label inside Cat Mode section) ────────────── */
+
+.cat-count-label {
+  margin-top: 8px;
+}
+
 /* ── Cat mode toggle button ───────────────────────────────────────────────── */
 
 .cat-toggle-btn {

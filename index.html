@@ -148,6 +148,14 @@
       <div class="panel-section">
         <div class="panel-label">Cat Mode</div>
         <button id="cat-mode-btn" class="cat-toggle-btn">🐾 Cats: OFF</button>
+        <div class="panel-label cat-count-label">Count: <span id="cat-count-val">4</span></div>
+        <div class="slider-row">
+          <span class="range-cap">1</span>
+          <input type="range" id="cat-count-slider"
+                 min="1" max="8" step="1" value="4"
+                 aria-label="Cat count">
+          <span class="range-cap">8</span>
+        </div>
       </div>
 
     </div><!-- /control-panel -->
@@ -275,11 +283,15 @@
     });
 
     // ── Cat mode button ────────────────────────────────────────────────────────
-    // toggleCatMode is defined in app.js (type="module", deferred), so it won't
-    // exist until after DOMContentLoaded. The click fires later, by which time
-    // the function is available on window.
     document.getElementById('cat-mode-btn').addEventListener('click', () => {
       if (window.toggleCatMode) window.toggleCatMode();
+    });
+
+    // ── Cat count slider ───────────────────────────────────────────────────────
+    document.getElementById('cat-count-slider').addEventListener('input', (e) => {
+      const n = parseInt(e.target.value, 10);
+      document.getElementById('cat-count-val').textContent = n;
+      if (window.setCatCount) window.setCatCount(n);
     });
   </script>
 

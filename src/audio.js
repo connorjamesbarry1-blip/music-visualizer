@@ -5,14 +5,15 @@
 
 export class AudioEngine {
   constructor() {
-    this.stream   = null;
-    this.ctx      = null;
-    this.analyser = null;
-    this.freqData = null;
-    this.timeData = null;
-    this.binWidth = 0;
-    this.ready    = false;
+    this.stream    = null;
+    this.ctx       = null;
+    this.analyser  = null;
+    this.freqData  = null;
+    this.timeData  = null;
+    this.binWidth  = 0;
+    this.ready     = false;
     this.onStopped = null;
+    this._beat     = new BeatDetector();
   }
 
   async start() {
@@ -93,6 +94,14 @@ export class AudioEngine {
     };
   }
 
+  getBeatInfo() {
+    if (!this.ready) return { isBeat: false, bpm: 120, bass: 0, mid: 0, high: 0, beatPhase: 0 };
+
+    const freq  = this.freqData;
+    const bands = this.getBands(freq);
+    return this._beat.detect(bands);
+  }
+
   stop() {
     this.ready = false;
     this.stream?.getTracks().forEach(t => t.stop());
@@ -100,5 +109,80 @@ export class AudioEngine {
     this.stream   = null;
     this.ctx      = null;
     this.analyser = null;
+    this._beat    = new BeatDetector();
+  }
+}
+
+class BeatDetector {
+  constructor() {
+    this._history    = new Float32Array(43);  // ~1.4s at 30fps
+    this._histIdx    = 0;
+    this._beatTimes  = [];                    // last 8 beat timestamps
+    this._lastBeat   = 0;
+    this._bpm        = 120;
+    this._beatPhase  = 0;
+    this._lastTs     = 0;
+  }
+
+  detect({ bass, mid, high }) {
+    const now = performance.now();
+    const dt  = now - this._lastTs;
+    this._lastTs = now;
+
+    // Rolling average of bass energy
+    this._history[this._histIdx % this._history.length] = bass;
+    this._histIdx++;
+    let sum = 0;
+    const len = Math.min(this._histIdx, this._history.length);
+    for (let i = 0; i < len; i++) sum += this._history[i];
+    const avg = sum / len;
+
+    // Standard deviation
+    let variance = 0;
+    for (let i = 0; i < len; i++) {
+      const d = this._history[i] - avg;
+      variance += d * d;
+    }
+    const sd = Math.sqrt(variance / len);
+
+    const cooldown = 150;
+    const isBeat = (
+      bass > avg + sd * 1.0 &&
+      bass > avg * 1.35 &&
+      bass > 0.12 &&
+      (now - this._lastBeat) > cooldown
+    );
+
+    if (isBeat) {
+      const interval = now - this._lastBeat;
+      this._lastBeat = now;
+      this._beatPhase = 0;
+
+      if (interval > 200 && interval < 2000) {
+        this._beatTimes.push(interval);
+        if (this._beatTimes.length > 8) this._beatTimes.shift();
+
+        if (this._beatTimes.length >= 3) {
+          const sorted = [...this._beatTimes].sort((a, b) => a - b);
+          const median = sorted[Math.floor(sorted.length / 2)];
+          const rawBpm = 60000 / median;
+          const clamped = Math.max(60, Math.min(180, rawBpm));
+          this._bpm += (clamped - this._bpm) * 0.25;
+        }
+      }
+    } else {
+      // Advance beatPhase at current BPM
+      const msPerBeat = 60000 / this._bpm;
+      this._beatPhase = Math.min(1, this._beatPhase + dt / msPerBeat);
+    }
+
+    return {
+      isBeat,
+      bpm:       this._bpm,
+      bass,
+      mid,
+      high,
+      beatPhase: this._beatPhase,
+    };
   }
 }

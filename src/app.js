@@ -64,20 +64,15 @@ function stopMetadataPoll() {
 
 window.toggleCatMode = function () {
   const entering  = !catMode.active;
-  const vizCanvas = document.getElementById('visualizer-canvas');
   const catCanvas = document.getElementById('cat-canvas');
   const btn       = document.getElementById('cat-mode-btn');
 
   if (entering) {
     catMode.enable();
-    vizCanvas.style.opacity       = '0';
-    catCanvas.style.opacity       = '1';
-    catCanvas.style.pointerEvents = 'auto';
+    catCanvas.style.opacity = '1';
   } else {
     catMode.disable();
-    vizCanvas.style.opacity       = '';
-    catCanvas.style.opacity       = '0';
-    catCanvas.style.pointerEvents = 'none';
+    catCanvas.style.opacity = '0';
   }
 
   if (btn) {
@@ -86,15 +81,21 @@ window.toggleCatMode = function () {
   }
 };
 
+window.setCatCount = function (n) {
+  catMode.setCatCount(n);
+};
+
 // ── RAF loop ──────────────────────────────────────────────────────────────────
 
 function startRaf() {
   function loop(ts) {
     rafId = requestAnimationFrame(loop);
-    const freq  = audioEngine.getFrequencyData();
-    const time  = audioEngine.getTimeDomainData();
-    const bands = audioEngine.getBands(freq);
-    visualizer.draw(freq, time, ts, bands);
+    const freq     = audioEngine.getFrequencyData();
+    const time     = audioEngine.getTimeDomainData();
+    const beatInfo = audioEngine.getBeatInfo();
+    // beatInfo already contains bass/mid/high — pass directly to visualizer
+    visualizer.draw(freq, time, ts, beatInfo);
+    catMode.tick(ts, beatInfo);
   }
   rafId = requestAnimationFrame(loop);
 }
@@ -156,8 +157,6 @@ async function init() {
 
   visualizer = new Visualizer(vizCanvas);
   catMode    = new CatMode(catCanvas);
-
-  visualizer.beatCallback = (confidence, energy) => catMode.onBeat(energy);
 
   document.getElementById('start-capture-btn')
     .addEventListener('click', startCapture);

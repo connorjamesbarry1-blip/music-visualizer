@@ -119,10 +119,10 @@ export class CatMode {
   setCatCount(n) {
     const count = Math.max(1, Math.min(8, n));
     this.cats = Array.from({ length: count }, (_, i) => ({
-      variant:      i % PALETTES.length,
-      move:         Math.floor(Math.random() * MOVE_COUNT),
-      moveDuration: 4 + Math.floor(Math.random() * 5),
-      beatCount:    0,
+      variant:       i % PALETTES.length,
+      move:          Math.floor(Math.random() * MOVE_COUNT),
+      moveDuration:  Math.random() < 0.5 ? 4 : 8, // 4 or 8 bars (musical phrasing)
+      gridBeatCount: 0,
       x: 0,
       y: 0,
     }));
@@ -132,9 +132,9 @@ export class CatMode {
   onBeat()        { /* beat info arrives via tick() now */ }
   onTrackChange() {
     for (const cat of this.cats) {
-      cat.move         = Math.floor(Math.random() * MOVE_COUNT);
-      cat.moveDuration = 4 + Math.floor(Math.random() * 5);
-      cat.beatCount    = 0;
+      cat.move          = Math.floor(Math.random() * MOVE_COUNT);
+      cat.moveDuration  = Math.random() < 0.5 ? 4 : 8;
+      cat.gridBeatCount = 0;
     }
   }
 
@@ -143,12 +143,13 @@ export class CatMode {
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
     for (const cat of this.cats) {
-      if (beatInfo.isBeat) {
-        cat.beatCount++;
-        if (cat.beatCount >= cat.moveDuration) {
-          cat.move         = Math.floor(Math.random() * MOVE_COUNT);
-          cat.moveDuration = 4 + Math.floor(Math.random() * 5);
-          cat.beatCount    = 0;
+      // Advance move on the grid clock, not on raw onsets
+      if (beatInfo.gridBeat) {
+        cat.gridBeatCount++;
+        if (cat.gridBeatCount >= cat.moveDuration) {
+          cat.move          = Math.floor(Math.random() * MOVE_COUNT);
+          cat.moveDuration  = Math.random() < 0.5 ? 4 : 8;
+          cat.gridBeatCount = 0;
         }
       }
       this._drawCat(cat, beatInfo);
@@ -172,33 +173,38 @@ export class CatMode {
     });
   }
 
-  _drawCat(cat, { bass, beatPhase }) {
+  _drawCat(cat, { kick, isKick, beatPhase }) {
     const S    = SPRITE_SIZE * SCALE;
     const half = S / 2;
 
-    // Arms-up briefly on beat hit, neutral otherwise
+    // Arms-up on the grid beat onset; neutral during the rest of the beat
     const frameIdx = beatPhase < 0.25 ? 1 : 0;
     const sprite   = this._sprites[cat.variant][frameIdx];
     const ctx      = this.ctx;
 
+    // Real kick punch: extra amplitude boost that decays within the beat
+    const accent = isKick ? (1 + kick * 1.5) : 1.0;
+    // Use kick energy (40-130 Hz) for amplitude — tighter than broad bass
+    const amp = kick;
+
     let dx = 0, dy = 0, angle = 0;
 
     switch (cat.move) {
-      case 0: // bounce — jump up on beat, gravity returns
-        dy = -Math.sin(beatPhase * Math.PI) * (8 + bass * 24);
+      case 0: // bounce — jump arc driven by grid phase; kick punches higher
+        dy = -Math.sin(beatPhase * Math.PI) * (8 + amp * 24) * accent;
         break;
-      case 1: // sidestep — left/right full cycle per beat
-        dx = Math.sin(beatPhase * Math.PI * 2) * (12 + bass * 18);
+      case 1: // sidestep — sinusoidal L/R; kick widens the swing
+        dx = Math.sin(beatPhase * Math.PI * 2) * (12 + amp * 18) * accent;
         break;
-      case 2: // spin — full rotation per beat
+      case 2: // spin — full rotation per beat (grid-locked, never stutters)
         angle = beatPhase * Math.PI * 2;
         break;
-      case 3: // headbang — forward nod with lean
-        dy    = -(1 - beatPhase) * (1 - beatPhase) * bass * 20;
-        angle = Math.sin(beatPhase * Math.PI) * (0.35 + bass * 0.3);
+      case 3: // headbang — nod into the beat, snap back; kick deepens nod
+        dy    = -(1 - beatPhase) * (1 - beatPhase) * amp * 20 * accent;
+        angle = Math.sin(beatPhase * Math.PI) * (0.35 + amp * 0.3);
         break;
-      case 4: // wiggle — rapid high-frequency shake
-        angle = Math.sin(beatPhase * Math.PI * 6) * (0.2 + bass * 0.25);
+      case 4: // wiggle — rapid high-freq shake; kick amps the wobble
+        angle = Math.sin(beatPhase * Math.PI * 6) * (0.2 + amp * 0.25) * accent;
         break;
     }
 

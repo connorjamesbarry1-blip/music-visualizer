@@ -87,15 +87,24 @@ window.setCatCount = function (n) {
 
 // ── RAF loop ──────────────────────────────────────────────────────────────────
 
+let _bpmDisplayTs = 0;
+
 function startRaf() {
   function loop(ts) {
     rafId = requestAnimationFrame(loop);
     const freq     = audioEngine.getFrequencyData();
     const time     = audioEngine.getTimeDomainData();
     const beatInfo = audioEngine.getBeatInfo();
-    // beatInfo already contains bass/mid/high — pass directly to visualizer
+    // beatInfo contains bass/mid/high — pass directly; visualizer reads those fields
     visualizer.draw(freq, time, ts, beatInfo);
     catMode.tick(ts, beatInfo);
+
+    // Update BPM readout at most once per second
+    if (ts - _bpmDisplayTs > 1000) {
+      _bpmDisplayTs = ts;
+      const el = document.getElementById('bpm-display');
+      if (el) el.textContent = `${beatInfo.bpm} BPM`;
+    }
   }
   rafId = requestAnimationFrame(loop);
 }

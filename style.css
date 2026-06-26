@@ -358,6 +358,17 @@ input[type="range"]::-moz-range-track {
   z-index: 4; /* above visualizer canvas, below track info (z-index: 10) */
 }
 
+/* ── BPM readout ──────────────────────────────────────────────────────────── */
+
+.bpm-display {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #1ed760;
+  line-height: 1;
+  padding: 2px 0;
+}
+
 /* ── Cat count label (secondary label inside Cat Mode section) ────────────── */
 
 .cat-count-label {

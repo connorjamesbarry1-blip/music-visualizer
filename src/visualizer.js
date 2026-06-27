@@ -1,4 +1,4 @@
-// FFT-driven music visualizer — 6 visualization modes.
+// FFT-driven music visualizer — 11 visualization modes.
 // app.js calls draw(freqData, timeData, ts) every RAF frame.
 // window.VIZ_SETTINGS is written by the panel script and read every frame.
 
@@ -61,6 +61,29 @@ export class Visualizer {
     this._terrainCtx = this._terrainBuf.getContext('2d');
 
     this._prevMode = null;
+
+    // Spectrum peak hold (A1)
+    this._spectrumPeaks = new Array(128).fill(0);
+
+    // Blob mode (B1)
+    this._blobPhase = 0;
+
+    // Flame mode (B2)
+    this._flameParticles = [];
+    this._flameColumns = 80;
+
+    // Orbital mode (B3)
+    this._orbitals = [];
+    this._orbitalInited = false;
+
+    // Rings mode (B4)
+    this._ringWaves = [];
+
+    // Ribbon mode (B5)
+    this._ribbonPoints = [];
+    this._ribbonPoints2 = [];
+    this._ribbonMaxPoints = 200;
+    this._ribbonTime = 0;
 
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
@@ -126,16 +149,25 @@ export class Visualizer {
         this._midParticles  = [];
         this._highParticles = [];
       }
+      if (mode === 'orbital') this._orbitalInited = false;
+      if (mode === 'flame') this._flameParticles = [];
+      if (mode === 'ribbon') { this._ribbonPoints = []; this._ribbonPoints2 = []; }
+      if (mode === 'rings') this._ringWaves = [];
       this._prevMode = mode;
     }
 
     switch (mode) {
-      case 'spectrum':  this._drawSpectrum(freqData, bands, dt);  break;
-      case 'waveform':  this._drawWaveform(timeData, bands);      break;
-      case 'radial':    this._drawRadial(freqData, bands, dt);    break;
-      case 'terrain':   this._drawTerrain(freqData);              break;
-      case 'particles': this._drawParticlesMode(bands, dt);       break;
-      case 'lissajous': this._drawLissajous(bands, dt);           break;
+      case 'spectrum':  this._drawSpectrum(freqData, bands, dt);         break;
+      case 'waveform':  this._drawWaveform(timeData, bands);             break;
+      case 'radial':    this._drawRadial(freqData, timeData, bands, dt); break;
+      case 'terrain':   this._drawTerrain(freqData);                     break;
+      case 'particles': this._drawParticlesMode(bands, dt);              break;
+      case 'lissajous': this._drawLissajous(bands, dt);                  break;
+      case 'blob':      this._drawBlob(freqData, bands, dt);             break;
+      case 'flame':     this._drawFlame(freqData, bands, dt);            break;
+      case 'orbital':   this._drawOrbital(bands, dt);                    break;
+      case 'rings':     this._drawRings(freqData, bands, dt);            break;
+      case 'ribbon':    this._drawRibbon(bands, dt);                     break;
       default:          this._drawSpectrum(freqData, bands, dt);
     }
   }
@@ -195,6 +227,16 @@ export class Visualizer {
 
       ctx.fillStyle = `hsla(${barHue},78%,${light}%,${0.52 + val * 0.48})`;
       ctx.fillRect(bx, H - barH, bw, barH);
+
+      // Peak hold and decay
+      if (barH > this._spectrumPeaks[i]) {
+        this._spectrumPeaks[i] = barH;
+      } else {
+        this._spectrumPeaks[i] = Math.max(0, this._spectrumPeaks[i] - dt * 120);
+      }
+      const peakY = H - this._spectrumPeaks[i];
+      ctx.fillStyle = `hsla(${barHue},90%,${Math.min(light + 20, 95)}%,0.9)`;
+      ctx.fillRect(bx, peakY, bw, 2);
     }
   }
 
@@ -231,13 +273,35 @@ export class Visualizer {
       ctx.stroke();
     };
 
-    drawLine(-0.42, 0.28); // mirrored reflection
-    drawLine(1,     0.88); // primary line
+    drawLine(-1, 0.28); // true symmetric mirror
+
+    // Beat glow
+    if (this._beatPulse > 0) {
+      ctx.save();
+      ctx.filter = 'blur(8px)';
+      ctx.beginPath();
+      ctx.moveTo(0, midY + (timeData[0] / 128 - 1) * amp);
+      for (let i = 1; i < len; i++) {
+        const x  = (i / (len - 1)) * W;
+        const y  = midY + (timeData[i]     / 128 - 1) * amp;
+        const px = ((i - 1) / (len - 1)) * W;
+        const py = midY + (timeData[i - 1] / 128 - 1) * amp;
+        ctx.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2);
+      }
+      ctx.lineTo(W, midY + (timeData[len - 1] / 128 - 1) * amp);
+      ctx.strokeStyle = `hsla(${hue},84%,65%,${0.15 * this._beatPulse})`;
+      ctx.lineWidth   = lw * 3;
+      ctx.lineJoin    = 'round';
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    drawLine(1, 0.88); // primary line
   }
 
   // ── Mode 3: Radial ─────────────────────────────────────────────────────────
 
-  _drawRadial(freqData, bands, dt) {
+  _drawRadial(freqData, timeData, bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
@@ -271,6 +335,27 @@ export class Visualizer {
       ctx.closePath();
       ctx.fillStyle = `hsla(${barHue},76%,${light}%,${0.5 + val * 0.5})`;
       ctx.fill();
+    }
+
+    // Inner waveform ring
+    if (timeData && timeData.length > 0) {
+      const waveR = innerR * 0.7;
+      const waveHue = (hue + 180) % 360;
+      const beatScale = 1 + this._beatPulse * 0.15;
+
+      ctx.beginPath();
+      for (let i = 0; i < timeData.length; i += 3) {
+        const angle = (i / timeData.length) * TWO_PI + this._radialAngle;
+        const displacement = (timeData[i] / 128 - 1) * innerR * 0.4;
+        const r = (waveR + displacement) * beatScale;
+        const x = cx + r * Math.cos(angle);
+        const y = cy + r * Math.sin(angle);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `hsla(${waveHue},80%,60%,0.55)`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
   }
 
@@ -320,6 +405,7 @@ export class Visualizer {
       decay: opts.decay,
       size:  opts.size,
       hue:   opts.hue,
+      trail: [],
     });
   }
 
@@ -327,10 +413,23 @@ export class Visualizer {
     const ctx = this.ctx;
     for (let i = pool.length - 1; i >= 0; i--) {
       const p = pool[i];
+      if (p.trail) {
+        p.trail.push({ x: p.x, y: p.y });
+        if (p.trail.length > 4) p.trail.shift();
+      }
       p.x    += p.vx * dt; p.y  += p.vy * dt;
       p.vy   += p.gy * dt;
       p.life -= p.decay * dt;
       if (p.life <= 0) { pool.splice(i, 1); continue; }
+      if (p.trail) {
+        for (let t = 0; t < p.trail.length; t++) {
+          const frac = t / p.trail.length;
+          ctx.beginPath();
+          ctx.arc(p.trail[t].x, p.trail[t].y, p.size * p.life * frac * 0.6, 0, TWO_PI);
+          ctx.fillStyle = `hsla(${p.hue},85%,65%,${p.life * frac * 0.4})`;
+          ctx.fill();
+        }
+      }
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size * p.life, 0, TWO_PI);
       ctx.fillStyle = `hsla(${p.hue},85%,65%,${p.life * 0.88})`;
@@ -502,6 +601,305 @@ export class Visualizer {
       ctx.arc(cx, cy, sw.r, 0, TWO_PI);
       ctx.strokeStyle = `hsla(${sw.hue},90%,76%,${sw.opacity})`;
       ctx.lineWidth   = 2.5;
+      ctx.stroke();
+    }
+  }
+
+  // ── Mode 7: Blob ─────────────────────────────────────────────────────────
+
+  _drawBlob(freqData, bands, dt) {
+    const { ctx, canvas } = this;
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2;
+    const s = window.VIZ_SETTINGS;
+    const hue = this._dHue();
+    const r = s.reactivity;
+
+    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+
+    const baseRadius = Math.min(W, H) * 0.25;
+    this._blobPhase += dt * (1.5 + bands.mid * 2);
+
+    for (let layer = 2; layer >= 0; layer--) {
+      const phaseOff = layer * 0.7;
+      const layerAlpha = layer === 0 ? 0.85 : 0.15 + layer * 0.1;
+      const layerScale = 1 + layer * 0.12;
+
+      ctx.beginPath();
+      for (let i = 0; i <= 120; i++) {
+        const angle = (i / 120) * TWO_PI;
+        const phase = this._blobPhase + phaseOff;
+        const noise1 = Math.sin(angle * 3 + phase) * Math.cos(angle * 2 + phase * 0.7);
+        const noise2 = Math.sin(angle * 5 + phase * 1.3) * 0.5;
+        const noise3 = Math.sin(angle * 8 + phase * 2.1) * 0.25;
+        const displacement = (noise1 + noise2 * bands.mid * r + noise3 * bands.high * r) * baseRadius * 0.35;
+        const rad = baseRadius * layerScale * (1 + bands.bass * 0.6 * r + this._beatPulse * 0.3) + displacement;
+        const x = cx + rad * Math.cos(angle);
+        const y = cy + rad * Math.sin(angle);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+
+      const layerHue = (hue + layer * 40) % 360;
+      ctx.fillStyle = `hsla(${layerHue},75%,50%,${layerAlpha * 0.5})`;
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${layerHue},80%,65%,${layerAlpha})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // ── Mode 8: Flame ─────────────────────────────────────────────────────────
+
+  _drawFlame(freqData, bands, dt) {
+    const { ctx, canvas } = this;
+    const W = canvas.width, H = canvas.height;
+    const s = window.VIZ_SETTINGS;
+    const r = s.reactivity;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.fillRect(0, 0, W, H);
+
+    this._blobPhase += dt * 2;
+
+    for (let col = 0; col < this._flameColumns; col++) {
+      const binIdx = Math.floor((col / this._flameColumns) * Math.min(freqData.length, 256));
+      const energy = freqData[binIdx] / 255;
+      if (energy < 0.08) continue;
+      if (this._flameParticles.length >= 600) break;
+
+      this._flameParticles.push({
+        x: col * (W / this._flameColumns) + (Math.random() - 0.5) * 10,
+        y: H,
+        vy: -(80 + energy * 250 * r + bands.bass * 100 * r),
+        vx: (Math.random() - 0.5) * 30,
+        life: 1.0,
+        decay: 1.2 + Math.random() * 0.8,
+        size: 3 + energy * 8,
+        hue: energy * 50,
+        sat: 100 - energy * 40,
+        light: 30 + energy * 45,
+      });
+    }
+
+    if (this._beatPulse === 1) {
+      const burstCount = Math.min(20, 600 - this._flameParticles.length);
+      for (let i = 0; i < burstCount; i++) {
+        this._flameParticles.push({
+          x: W / 2 + (Math.random() - 0.5) * W * 0.3,
+          y: H,
+          vy: -(150 + Math.random() * 200 * r),
+          vx: (Math.random() - 0.5) * 80,
+          life: 1.0,
+          decay: 0.8 + Math.random() * 0.6,
+          size: 5 + Math.random() * 8,
+          hue: 30 + Math.random() * 30,
+          sat: 90,
+          light: 60 + Math.random() * 20,
+        });
+      }
+    }
+
+    for (let i = this._flameParticles.length - 1; i >= 0; i--) {
+      const p = this._flameParticles[i];
+      p.vx += Math.sin(p.y * 0.02 + this._blobPhase) * 40 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= p.decay * dt;
+      if (p.life <= 0) { this._flameParticles.splice(i, 1); continue; }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, TWO_PI);
+      ctx.fillStyle = `hsla(${p.hue},${p.sat}%,${p.light}%,${p.life * 0.85})`;
+      ctx.fill();
+    }
+  }
+
+  // ── Mode 9: Orbital ───────────────────────────────────────────────────────
+
+  _drawOrbital(bands, dt) {
+    const { ctx, canvas } = this;
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2;
+    const s = window.VIZ_SETTINGS;
+    const hue = this._dHue();
+    const r = s.reactivity;
+
+    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+
+    if (!this._orbitalInited || this._orbitals.length === 0) {
+      this._orbitals = [];
+      for (let i = 0; i < 200; i++) {
+        this._orbitals.push({
+          orbitRadius: 40 + Math.random() * Math.min(W, H) * 0.35,
+          angle: Math.random() * TWO_PI,
+          speed: (0.2 + Math.random() * 0.8) * (Math.random() < 0.5 ? 1 : -1),
+          eccentricity: 0.6 + Math.random() * 0.35,
+          size: 1 + Math.random() * 2.5,
+          hue: (hue + Math.random() * 60) % 360,
+          tilt: Math.random() * Math.PI,
+        });
+      }
+      this._orbitalInited = true;
+    }
+
+    const glowR = 30 + bands.bass * 80 * r;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+    grad.addColorStop(0, `hsla(${hue},80%,70%,${0.3 + bands.bass * 0.4})`);
+    grad.addColorStop(1, 'hsla(0,0%,0%,0)');
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowR, 0, TWO_PI);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    const maxDim = Math.max(W, H);
+    for (const p of this._orbitals) {
+      p.angle += p.speed * dt * (1 + bands.mid * 1.5 * r);
+      if (this._beatPulse > 0.5) {
+        p.orbitRadius += this._beatPulse * 8;
+      }
+      p.orbitRadius += (bands.high * 3 - bands.bass * 2) * dt * 60 * r;
+      p.orbitRadius = Math.max(20, Math.min(p.orbitRadius, maxDim * 0.45));
+
+      const ex = p.orbitRadius * Math.cos(p.angle);
+      const ey = p.orbitRadius * p.eccentricity * Math.sin(p.angle);
+      const x = cx + ex * Math.cos(p.tilt) - ey * Math.sin(p.tilt);
+      const y = cy + ex * Math.sin(p.tilt) + ey * Math.cos(p.tilt);
+
+      const dist = Math.hypot(x - cx, y - cy);
+      const brightness = Math.max(40, 80 - (dist / maxDim) * 60);
+
+      ctx.beginPath();
+      ctx.arc(x, y, p.size, 0, TWO_PI);
+      ctx.fillStyle = `hsla(${p.hue},75%,${brightness}%,0.85)`;
+      ctx.fill();
+    }
+  }
+
+  // ── Mode 10: Rings ────────────────────────────────────────────────────────
+
+  _drawRings(freqData, bands, dt) {
+    const { ctx, canvas } = this;
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2;
+    const s = window.VIZ_SETTINGS;
+    const hue = this._dHue();
+    const r = s.reactivity;
+
+    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+
+    const maxR = Math.min(W, H) * 0.42;
+    const innerR = maxR * 0.1;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(this._radialAngle);
+
+    for (let i = 0; i < 8; i++) {
+      const binStart = Math.floor((i / 8) * 128);
+      const binEnd = Math.floor(((i + 1) / 8) * 128);
+      let energy = 0;
+      for (let b = binStart; b < binEnd; b++) energy += freqData[b] / 255;
+      energy /= (binEnd - binStart);
+
+      const baseR = innerR + (i / 7) * (maxR - innerR);
+      const ringR = baseR + energy * 25 * r;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, TWO_PI);
+      ctx.strokeStyle = `hsla(${(hue + i * 20) % 360},75%,${40 + energy * 35}%,${0.4 + energy * 0.5})`;
+      ctx.lineWidth = 1.5 + energy * 3;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    if (this._beatPulse === 1) {
+      this._ringWaves.push({
+        r: innerR * 0.5,
+        speed: 200 + bands.bass * 300 * r,
+        opacity: 0.8,
+        hue: hue,
+        lineWidth: 2 + bands.bass * 4,
+      });
+    }
+
+    for (let i = this._ringWaves.length - 1; i >= 0; i--) {
+      const rw = this._ringWaves[i];
+      rw.r += rw.speed * dt;
+      rw.opacity -= dt * 1.2;
+      if (rw.opacity <= 0 || rw.r > Math.max(W, H)) {
+        this._ringWaves.splice(i, 1);
+        continue;
+      }
+      ctx.beginPath();
+      ctx.arc(cx, cy, rw.r, 0, TWO_PI);
+      ctx.strokeStyle = `hsla(${rw.hue},85%,65%,${rw.opacity})`;
+      ctx.lineWidth = rw.lineWidth;
+      ctx.stroke();
+    }
+  }
+
+  // ── Mode 11: Ribbon ───────────────────────────────────────────────────────
+
+  _drawRibbon(bands, dt) {
+    const { ctx, canvas } = this;
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2;
+    const s = window.VIZ_SETTINGS;
+    const hue = this._dHue();
+    const r = s.reactivity;
+
+    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha * 0.7})`;
+    ctx.fillRect(0, 0, W, H);
+
+    this._ribbonTime += dt;
+
+    // Primary ribbon
+    const headX = cx + Math.sin(this._ribbonTime * 0.8 + bands.bass * 2 * r) * W * 0.35;
+    const headY = cy + Math.cos(this._ribbonTime * 0.6 + bands.mid * 1.5 * r) * H * 0.30;
+    this._ribbonPoints.push({
+      x: headX, y: headY,
+      hue: hue,
+      width: 3 + bands.bass * 20 * r + this._beatPulse * 15,
+    });
+    if (this._ribbonPoints.length > this._ribbonMaxPoints) this._ribbonPoints.shift();
+
+    for (let i = 1; i < this._ribbonPoints.length; i++) {
+      const prev = this._ribbonPoints[i - 1];
+      const curr = this._ribbonPoints[i];
+      const age = i / this._ribbonPoints.length;
+      ctx.beginPath();
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(curr.x, curr.y);
+      ctx.strokeStyle = `hsla(${curr.hue},80%,55%,${age * 0.9})`;
+      ctx.lineWidth = curr.width * age;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+
+    // Secondary ribbon at offset phase with complementary hue
+    const head2X = cx + Math.sin((this._ribbonTime + Math.PI) * 0.8 + bands.bass * 2 * r) * W * 0.35;
+    const head2Y = cy + Math.cos((this._ribbonTime + Math.PI) * 0.6 + bands.mid * 1.5 * r) * H * 0.30;
+    this._ribbonPoints2.push({
+      x: head2X, y: head2Y,
+      hue: (hue + 120) % 360,
+      width: 3 + bands.bass * 15 * r + this._beatPulse * 10,
+    });
+    if (this._ribbonPoints2.length > this._ribbonMaxPoints) this._ribbonPoints2.shift();
+
+    for (let i = 1; i < this._ribbonPoints2.length; i++) {
+      const prev = this._ribbonPoints2[i - 1];
+      const curr = this._ribbonPoints2[i];
+      const age = i / this._ribbonPoints2.length;
+      ctx.beginPath();
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(curr.x, curr.y);
+      ctx.strokeStyle = `hsla(${curr.hue},80%,55%,${age * 0.45})`;
+      ctx.lineWidth = curr.width * age;
+      ctx.lineCap = 'round';
       ctx.stroke();
     }
   }

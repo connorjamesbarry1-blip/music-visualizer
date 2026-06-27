@@ -110,21 +110,24 @@ export class Visualizer {
   }
 
   // ── Fade helper ─────────────────────────────────────────────────────────────
-  // Ensures composite op is source-over before fading so screen-blended
-  // content actually fades to pure black.  When the slider is at max (≥0.148)
-  // skip the fade entirely so colours persist forever.
+  // Slider: left (min 0.005) = "Long" = colors persist, no fade.
+  //         right (max 0.15)  = "None" = trails vanish quickly.
+  //
+  // Uses destination-out to truly erase pixels rather than layering
+  // semi-transparent black (which can never reach #000 and leaves grey).
   // minAlpha lets modes that need faster clearing set a floor.
   _applyFade(minAlpha = 0) {
     const { ctx, canvas } = this;
     const s = window.VIZ_SETTINGS;
     const alpha = Math.max(s.fadeAlpha, minAlpha);
-    // Max slider value is 0.15 — treat anything near that as "no fade"
-    if (alpha >= 0.148) return;
+    // Low alpha (slider left, "Long") → skip fade, colors stay
+    if (alpha <= 0.008) return;
     const prev = ctx.globalCompositeOperation;
-    ctx.globalCompositeOperation = 'source-over';
-    // Use a stronger alpha floor to prevent grey residue
-    const effective = Math.max(alpha * 2.5, 0.06);
-    ctx.fillStyle = `rgba(0,0,0,${effective})`;
+    // destination-out: white rect at X% opacity *removes* X% of every
+    // pixel's alpha each frame, so trails genuinely decay to nothing.
+    ctx.globalCompositeOperation = 'destination-out';
+    const effective = Math.min(alpha * 3, 1.0);
+    ctx.fillStyle = `rgba(255,255,255,${effective})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = prev;
   }

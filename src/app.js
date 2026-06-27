@@ -1,4 +1,15 @@
-import { redirectToSpotify, handleCallback } from './auth.js';
+// app.js — entry point.
+//
+// Spotify login is now OPTIONAL.  The visualizer works entirely via browser
+// tab-audio capture (getDisplayMedia) with no Spotify API calls required.
+//
+// If the user has previously authenticated with Spotify (token stored by
+// auth.js), we show track metadata as a bonus — but we poll at a very slow
+// rate (once per minute on demand) so we never hammer the endpoint.
+//
+// The old 3-second setInterval that caused ~4 k API calls/hour is gone.
+
+import { redirectToSpotify, handleCallback, getAccessToken } from './auth.js';
 import { getCurrentTrack } from './spotify.js';
 import { AudioEngine } from './audio.js';
 import { Visualizer } from './visualizer.js';
@@ -8,7 +19,6 @@ let audioEngine = new AudioEngine();
 let visualizer  = null;
 let catMode     = null;
 let rafId       = null;
-let metaPollId  = null;
 
 // ── Screen transitions ────────────────────────────────────────────────────────
 
@@ -33,31 +43,34 @@ function setTrackInfo(track) {
   }
 }
 
-// ── Metadata poll — track name / artist via Spotify Web API ──────────────────
+// ── Spotify metadata — single lazy fetch, no polling loop ────────────────────
+//
+// We fetch once when the visualizer starts, then again at most once per minute
+// if the user is still connected to Spotify.  This replaces the old 3-second
+// setInterval that was producing ~4 000 API calls per hour.
 
-async function pollOnce() {
+let _lastMetaFetchMs = 0;
+const META_THROTTLE_MS = 60_000; // 1 fetch per minute at most
+
+async function fetchTrackMeta() {
   try {
+    const token = await getAccessToken();
+    if (!token) return; // not logged in — skip silently
+    const now = performance.now();
+    if (now - _lastMetaFetchMs < META_THROTTLE_MS) return;
+    _lastMetaFetchMs = now;
     const data = await getCurrentTrack();
     if (data?.item) {
       setTrackInfo({
         name:   data.item.name,
         artist: data.item.artists.map(a => a.name).join(', '),
       });
-      catMode.onTrackChange({ energy: 0.5 });
-    } else {
-      setTrackInfo(null);
+      catMode?.onTrackChange({ energy: 0.5 });
     }
-  } catch { /* transient error — next tick will retry */ }
-}
-
-function startMetadataPoll() {
-  pollOnce();
-  metaPollId = setInterval(pollOnce, 3000);
-}
-
-function stopMetadataPoll() {
-  clearInterval(metaPollId);
-  metaPollId = null;
+    // If nothing is playing we just leave the overlay hidden — no need to clear.
+  } catch {
+    // Transient error or auth expired — silently skip; we never throw here.
+  }
 }
 
 // ── Cat mode toggle ───────────────────────────────────────────────────────────
@@ -87,7 +100,8 @@ window.setCatCount = function (n) {
 
 // ── RAF loop ──────────────────────────────────────────────────────────────────
 
-let _bpmDisplayTs = 0;
+let _bpmDisplayTs   = 0;
+let _metaRefreshTs  = 0;
 
 function startRaf() {
   function loop(ts) {
@@ -95,15 +109,21 @@ function startRaf() {
     const freq     = audioEngine.getFrequencyData();
     const time     = audioEngine.getTimeDomainData();
     const beatInfo = audioEngine.getBeatInfo();
-    // beatInfo contains bass/mid/high — pass directly; visualizer reads those fields
+
     visualizer.draw(freq, time, ts, beatInfo);
     catMode.tick(ts, beatInfo);
 
-    // Update BPM readout at most once per second
+    // BPM display — update at most once per second
     if (ts - _bpmDisplayTs > 1000) {
       _bpmDisplayTs = ts;
       const el = document.getElementById('bpm-display');
       if (el) el.textContent = `${beatInfo.bpm} BPM`;
+    }
+
+    // Track metadata — refresh at most once per minute (no busy polling)
+    if (ts - _metaRefreshTs > META_THROTTLE_MS) {
+      _metaRefreshTs = ts;
+      fetchTrackMeta();
     }
   }
   rafId = requestAnimationFrame(loop);
@@ -143,6 +163,8 @@ async function startCapture() {
       resetCaptureBtn();
     };
 
+    // Lazy-fetch track info once right as the visualizer opens (if logged in)
+    _metaRefreshTs = -META_THROTTLE_MS; // force immediate fetch on first RAF tick
     showScreen('visualizer-screen');
     startRaf();
   } catch (e) {
@@ -159,6 +181,13 @@ async function startCapture() {
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
+//
+// Flow:
+//   1. Spotify OAuth callback (?code=…) → store token → capture screen
+//   2. Anything else → capture screen directly (no login required)
+//
+// The old "show login-screen by default" behaviour is removed.  Spotify login
+// is now reached only via the optional "Connect Spotify" link in the UI.
 
 async function init() {
   const vizCanvas = document.getElementById('visualizer-canvas');
@@ -170,25 +199,25 @@ async function init() {
   document.getElementById('start-capture-btn')
     .addEventListener('click', startCapture);
 
+  // Optional Spotify connect button (may not exist if HTML is simplified)
+  document.getElementById('spotify-login-btn')
+    ?.addEventListener('click', () => redirectToSpotify());
+
   const params = new URLSearchParams(window.location.search);
 
   if (params.has('code') || params.has('error')) {
+    // Returning from Spotify OAuth — complete the exchange then go to capture.
     try {
-      const ok = await handleCallback();
-      if (ok) {
-        startMetadataPoll();
-        showScreen('capture-screen');
-        return;
-      }
+      await handleCallback();
     } catch (err) {
-      console.error('Auth callback failed:', err);
+      console.error('Spotify auth callback failed:', err);
     }
+    // Clean the URL so a refresh doesn't re-run the callback
+    history.replaceState({}, '', window.location.pathname);
   }
 
-  showScreen('login-screen');
-  document.getElementById('login-btn').addEventListener('click', () => {
-    redirectToSpotify();
-  });
+  // Everyone lands on the capture screen — no login wall.
+  showScreen('capture-screen');
 }
 
 document.addEventListener('DOMContentLoaded', init);

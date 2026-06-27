@@ -930,5 +930,4 @@ _drawRibbon(bands, dt) {
     }
     ctx.globalCompositeOperation = 'source-over';
   }
-  }
 }

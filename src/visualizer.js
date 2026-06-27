@@ -652,72 +652,79 @@ export class Visualizer {
 
   // ── Mode 8: Flame ─────────────────────────────────────────────────────────
 
-  _drawFlame(freqData, bands, dt) {
+_drawFlame(freqData, bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const s = window.VIZ_SETTINGS;
     const r = s.reactivity;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    // Use global fadeAlpha (was hardcoded to 0.15 previously)
+    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.08)})`;
     ctx.fillRect(0, 0, W, H);
 
-    this._blobPhase += dt * 2;
+    this._blobPhase += dt * (2 + bands.mid * 5 * r);
 
     for (let col = 0; col < this._flameColumns; col++) {
-      const binIdx = Math.floor((col / this._flameColumns) * Math.min(freqData.length, 256));
+      // FIX: Map columns only to the lower 100 bins (active audio spectrum)
+      const binIdx = Math.floor((col / this._flameColumns) * 100);
       const energy = freqData[binIdx] / 255;
-      if (energy < 0.08) continue;
-      if (this._flameParticles.length >= 600) break;
+      
+      if (energy < 0.05) continue;
+      if (this._flameParticles.length >= 800) break;
 
       this._flameParticles.push({
-        x: col * (W / this._flameColumns) + (Math.random() - 0.5) * 10,
-        y: H,
-        vy: -(80 + energy * 250 * r + bands.bass * 100 * r),
-        vx: (Math.random() - 0.5) * 30,
+        x: col * (W / this._flameColumns) + (Math.random() - 0.5) * 15,
+        y: H + 10,
+        // FIX: Cranked up velocity based on reactivity and bass
+        vy: -(80 + energy * 400 * r + bands.bass * 250 * r),
+        vx: (Math.random() - 0.5) * (30 + bands.mid * 80 * r),
         life: 1.0,
-        decay: 1.2 + Math.random() * 0.8,
-        size: 3 + energy * 8,
-        hue: energy * 50,
-        sat: 100 - energy * 40,
-        light: 30 + energy * 45,
+        decay: 0.8 + Math.random() * 0.5,
+        size: 4 + energy * 12 * r,
+        hue: (energy * 50),
+        sat: 100,
+        light: 40 + energy * 50,
       });
     }
 
-    if (this._beatPulse === 1) {
-      const burstCount = Math.min(20, 600 - this._flameParticles.length);
+    if (this._beatPulse > 0.5) {
+      const burstCount = Math.min(40, 800 - this._flameParticles.length);
       for (let i = 0; i < burstCount; i++) {
         this._flameParticles.push({
-          x: W / 2 + (Math.random() - 0.5) * W * 0.3,
+          x: W / 2 + (Math.random() - 0.5) * W * 0.9, // Spread across whole width
           y: H,
-          vy: -(150 + Math.random() * 200 * r),
-          vx: (Math.random() - 0.5) * 80,
+          vy: -(200 + Math.random() * 450 * r),
+          vx: (Math.random() - 0.5) * 150,
           life: 1.0,
-          decay: 0.8 + Math.random() * 0.6,
-          size: 5 + Math.random() * 8,
-          hue: 30 + Math.random() * 30,
-          sat: 90,
-          light: 60 + Math.random() * 20,
+          decay: 0.6 + Math.random() * 0.4,
+          size: 6 + Math.random() * 12 * r,
+          hue: 15 + Math.random() * 30,
+          sat: 100,
+          light: 50 + Math.random() * 30,
         });
       }
     }
 
+    ctx.globalCompositeOperation = 'screen'; // Prevents muddy grey overlapping
     for (let i = this._flameParticles.length - 1; i >= 0; i--) {
       const p = this._flameParticles[i];
-      p.vx += Math.sin(p.y * 0.02 + this._blobPhase) * 40 * dt;
+      p.vx += Math.sin(p.y * 0.01 + this._blobPhase) * 60 * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.life -= p.decay * dt;
+      
       if (p.life <= 0) { this._flameParticles.splice(i, 1); continue; }
+      
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size * p.life, 0, TWO_PI);
-      ctx.fillStyle = `hsla(${p.hue},${p.sat}%,${p.light}%,${p.life * 0.85})`;
+      ctx.fillStyle = `hsla(${p.hue},${p.sat}%,${p.light}%,${p.life})`;
       ctx.fill();
     }
+    ctx.globalCompositeOperation = 'source-over'; // Reset for next frame
   }
 
   // ── Mode 9: Orbital ───────────────────────────────────────────────────────
-
-  _drawOrbital(bands, dt) {
+_drawOrbital(bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
@@ -725,28 +732,29 @@ export class Visualizer {
     const hue = this._dHue();
     const r = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
+    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.08)})`;
     ctx.fillRect(0, 0, W, H);
 
     if (!this._orbitalInited || this._orbitals.length === 0) {
       this._orbitals = [];
-      for (let i = 0; i < 200; i++) {
+      for (let i = 0; i < 250; i++) {
         this._orbitals.push({
-          orbitRadius: 40 + Math.random() * Math.min(W, H) * 0.35,
+          baseRadius: 40 + Math.random() * Math.min(W, H) * 0.35,
+          orbitRadius: 0,
           angle: Math.random() * TWO_PI,
-          speed: (0.2 + Math.random() * 0.8) * (Math.random() < 0.5 ? 1 : -1),
-          eccentricity: 0.6 + Math.random() * 0.35,
-          size: 1 + Math.random() * 2.5,
-          hue: (hue + Math.random() * 60) % 360,
+          speed: (0.4 + Math.random() * 1.2) * (Math.random() < 0.5 ? 1 : -1),
+          eccentricity: 0.5 + Math.random() * 0.4,
+          size: 1.5 + Math.random() * 3,
+          hue: (hue + Math.random() * 80 - 40 + 360) % 360,
           tilt: Math.random() * Math.PI,
         });
       }
       this._orbitalInited = true;
     }
 
-    const glowR = 30 + bands.bass * 80 * r;
+    const glowR = 30 + bands.bass * 150 * r; // Bigger core glow
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-    grad.addColorStop(0, `hsla(${hue},80%,70%,${0.3 + bands.bass * 0.4})`);
+    grad.addColorStop(0, `hsla(${hue},80%,70%,${0.4 + bands.bass * 0.5})`);
     grad.addColorStop(1, 'hsla(0,0%,0%,0)');
     ctx.beginPath();
     ctx.arc(cx, cy, glowR, 0, TWO_PI);
@@ -754,13 +762,16 @@ export class Visualizer {
     ctx.fill();
 
     const maxDim = Math.max(W, H);
+    
+    ctx.globalCompositeOperation = 'screen';
     for (const p of this._orbitals) {
-      p.angle += p.speed * dt * (1 + bands.mid * 1.5 * r);
-      if (this._beatPulse > 0.5) {
-        p.orbitRadius += this._beatPulse * 8;
-      }
-      p.orbitRadius += (bands.high * 3 - bands.bass * 2) * dt * 60 * r;
-      p.orbitRadius = Math.max(20, Math.min(p.orbitRadius, maxDim * 0.45));
+      // FIX: Massive speed multiplier based on mids and highs
+      p.angle += p.speed * dt * (1 + bands.mid * 6 * r + bands.high * 4 * r);
+      
+      // FIX: Radius pumps aggressively on bass/beats
+      const targetRadius = p.baseRadius + (bands.bass * 150 * r) + (this._beatPulse * 80 * r);
+      p.orbitRadius += (targetRadius - p.orbitRadius) * dt * 10; 
+      p.orbitRadius = Math.max(20, Math.min(p.orbitRadius, maxDim * 0.6));
 
       const ex = p.orbitRadius * Math.cos(p.angle);
       const ey = p.orbitRadius * p.eccentricity * Math.sin(p.angle);
@@ -768,18 +779,20 @@ export class Visualizer {
       const y = cy + ex * Math.sin(p.tilt) + ey * Math.cos(p.tilt);
 
       const dist = Math.hypot(x - cx, y - cy);
-      const brightness = Math.max(40, 80 - (dist / maxDim) * 60);
+      const brightness = Math.max(50, 90 - (dist / maxDim) * 50);
+      
+      // FIX: Particle size scales with bass
+      const currentSize = p.size * (1 + bands.bass * 2.5 * r);
 
       ctx.beginPath();
-      ctx.arc(x, y, p.size, 0, TWO_PI);
-      ctx.fillStyle = `hsla(${p.hue},75%,${brightness}%,0.85)`;
+      ctx.arc(x, y, currentSize, 0, TWO_PI);
+      ctx.fillStyle = `hsla(${p.hue},85%,${brightness}%,0.9)`;
       ctx.fill();
     }
+    ctx.globalCompositeOperation = 'source-over';
   }
-
   // ── Mode 10: Rings ────────────────────────────────────────────────────────
-
-  _drawRings(freqData, bands, dt) {
+_drawRings(freqData, bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
@@ -787,64 +800,70 @@ export class Visualizer {
     const hue = this._dHue();
     const r = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
+    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.08)})`;
     ctx.fillRect(0, 0, W, H);
 
-    const maxR = Math.min(W, H) * 0.42;
+    const maxR = Math.min(W, H) * 0.45;
     const innerR = maxR * 0.1;
 
     ctx.save();
     ctx.translate(cx, cy);
+    // Add reactivity to the global rotation
+    this._radialAngle += dt * (0.2 + bands.mid * 2 * r);
     ctx.rotate(this._radialAngle);
 
+    ctx.globalCompositeOperation = 'screen';
     for (let i = 0; i < 8; i++) {
-      const binStart = Math.floor((i / 8) * 128);
-      const binEnd = Math.floor(((i + 1) / 8) * 128);
+      const binStart = Math.floor((i / 8) * 90); // Focused on lower 90 bins
+      const binEnd = Math.floor(((i + 1) / 8) * 90);
       let energy = 0;
       for (let b = binStart; b < binEnd; b++) energy += freqData[b] / 255;
       energy /= (binEnd - binStart);
 
       const baseR = innerR + (i / 7) * (maxR - innerR);
-      const ringR = baseR + energy * 25 * r;
+      // FIX: Rings jump out massively on energy
+      const ringR = baseR + energy * 120 * r + (this._beatPulse * 20);
 
       ctx.beginPath();
       ctx.arc(0, 0, ringR, 0, TWO_PI);
-      ctx.strokeStyle = `hsla(${(hue + i * 20) % 360},75%,${40 + energy * 35}%,${0.4 + energy * 0.5})`;
-      ctx.lineWidth = 1.5 + energy * 3;
+      ctx.strokeStyle = `hsla(${(hue + i * 25) % 360},85%,${50 + energy * 30}%,${0.5 + energy * 0.5})`;
+      // FIX: Line width pulses aggressively
+      ctx.lineWidth = 2 + energy * 15 * r;
       ctx.stroke();
     }
-
     ctx.restore();
 
-    if (this._beatPulse === 1) {
+    if (this._beatPulse > 0.8) {
       this._ringWaves.push({
-        r: innerR * 0.5,
-        speed: 200 + bands.bass * 300 * r,
-        opacity: 0.8,
+        r: innerR,
+        speed: 400 + bands.bass * 600 * r,
+        opacity: 0.9,
         hue: hue,
-        lineWidth: 2 + bands.bass * 4,
+        lineWidth: 3 + bands.bass * 8 * r,
       });
+      this._beatPulse = 0.5; // Debounce slightly
     }
 
     for (let i = this._ringWaves.length - 1; i >= 0; i--) {
       const rw = this._ringWaves[i];
       rw.r += rw.speed * dt;
-      rw.opacity -= dt * 1.2;
-      if (rw.opacity <= 0 || rw.r > Math.max(W, H)) {
+      rw.opacity -= dt * 1.5;
+      if (rw.opacity <= 0 || rw.r > Math.max(W, H) * 1.5) {
         this._ringWaves.splice(i, 1);
         continue;
       }
       ctx.beginPath();
       ctx.arc(cx, cy, rw.r, 0, TWO_PI);
-      ctx.strokeStyle = `hsla(${rw.hue},85%,65%,${rw.opacity})`;
+      ctx.strokeStyle = `hsla(${rw.hue},90%,65%,${rw.opacity})`;
       ctx.lineWidth = rw.lineWidth;
       ctx.stroke();
     }
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   // ── Mode 11: Ribbon ───────────────────────────────────────────────────────
 
-  _drawRibbon(bands, dt) {
+_drawRibbon(bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
@@ -852,21 +871,28 @@ export class Visualizer {
     const hue = this._dHue();
     const r = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha * 0.7})`;
+    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.08)})`;
     ctx.fillRect(0, 0, W, H);
 
-    this._ribbonTime += dt;
+    // FIX: Time moves faster based on mid-range audio
+    this._ribbonTime += dt * (1 + bands.mid * 3 * r);
 
-    // Primary ribbon
-    const headX = cx + Math.sin(this._ribbonTime * 0.8 + bands.bass * 2 * r) * W * 0.35;
-    const headY = cy + Math.cos(this._ribbonTime * 0.6 + bands.mid * 1.5 * r) * H * 0.30;
+    // FIX: Amplitude of the ribbon's path widens on bass hits
+    const ampX = W * (0.3 + bands.bass * 0.2 * r);
+    const ampY = H * (0.25 + bands.mid * 0.2 * r);
+
+    const headX = cx + Math.sin(this._ribbonTime * 1.2) * ampX;
+    const headY = cy + Math.cos(this._ribbonTime * 0.9 + Math.sin(this._ribbonTime * 0.5)) * ampY;
+    
     this._ribbonPoints.push({
       x: headX, y: headY,
       hue: hue,
-      width: 3 + bands.bass * 20 * r + this._beatPulse * 15,
+      // FIX: Massive width variations
+      width: 4 + bands.bass * 45 * r + this._beatPulse * 25,
     });
     if (this._ribbonPoints.length > this._ribbonMaxPoints) this._ribbonPoints.shift();
 
+    ctx.globalCompositeOperation = 'screen';
     for (let i = 1; i < this._ribbonPoints.length; i++) {
       const prev = this._ribbonPoints[i - 1];
       const curr = this._ribbonPoints[i];
@@ -874,19 +900,19 @@ export class Visualizer {
       ctx.beginPath();
       ctx.moveTo(prev.x, prev.y);
       ctx.lineTo(curr.x, curr.y);
-      ctx.strokeStyle = `hsla(${curr.hue},80%,55%,${age * 0.9})`;
+      ctx.strokeStyle = `hsla(${curr.hue},85%,60%,${age})`;
       ctx.lineWidth = curr.width * age;
       ctx.lineCap = 'round';
       ctx.stroke();
     }
 
-    // Secondary ribbon at offset phase with complementary hue
-    const head2X = cx + Math.sin((this._ribbonTime + Math.PI) * 0.8 + bands.bass * 2 * r) * W * 0.35;
-    const head2Y = cy + Math.cos((this._ribbonTime + Math.PI) * 0.6 + bands.mid * 1.5 * r) * H * 0.30;
+    const head2X = cx + Math.sin(this._ribbonTime * 1.1 + Math.PI) * ampX;
+    const head2Y = cy + Math.cos(this._ribbonTime * 0.8 + Math.PI) * ampY;
+    
     this._ribbonPoints2.push({
       x: head2X, y: head2Y,
       hue: (hue + 120) % 360,
-      width: 3 + bands.bass * 15 * r + this._beatPulse * 10,
+      width: 3 + bands.bass * 35 * r + this._beatPulse * 15,
     });
     if (this._ribbonPoints2.length > this._ribbonMaxPoints) this._ribbonPoints2.shift();
 
@@ -897,10 +923,12 @@ export class Visualizer {
       ctx.beginPath();
       ctx.moveTo(prev.x, prev.y);
       ctx.lineTo(curr.x, curr.y);
-      ctx.strokeStyle = `hsla(${curr.hue},80%,55%,${age * 0.45})`;
+      ctx.strokeStyle = `hsla(${curr.hue},85%,60%,${age * 0.7})`;
       ctx.lineWidth = curr.width * age;
       ctx.lineCap = 'round';
       ctx.stroke();
     }
+    ctx.globalCompositeOperation = 'source-over';
+  }
   }
 }

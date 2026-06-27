@@ -7,9 +7,8 @@
 //   spiral, polygon, tunnel, rings
 
 const TWO_PI             = Math.PI * 2;
-const CURVE_STEPS        = 1500;
+const CURVE_STEPS        = 50;
 const CURVE_PERIOD       = Math.PI * 10;
-const MAX_LISS_PARTICLES = 200;
 const BEAT_COOLDOWN_MS   = 200;
 
 window.VIZ_SETTINGS ??= {
@@ -51,8 +50,6 @@ export class Visualizer {
     ];
     // Per-curve independent hue offset for color split
     this._curveHueOffsets = [0, 120, 240];
-    this._lissParticles   = [];
-    this._shockwaves      = [];
     // Lissajous drift — the whole figure drifts slowly around the screen
     this._lissDriftX  = 0;
     this._lissDriftY  = 0;
@@ -148,20 +145,14 @@ export class Visualizer {
     if (isBeat) {
       this._beatPulse = 1;
       if (this.beatCallback) this.beatCallback(1.0, bands.bass);
-      this._shockwaves.push({ r: 0, speed: 260 + bands.bass * 180, opacity: 0.70, hue: this.hue });
-      if (mode === 'lissajous') this._spawnLissParticles(bands, s);
       // Polygon: trigger a side-count morph on beat
       if (mode === 'polygon') {
-        this._polySideTarget = 3 + Math.floor(Math.random() * 6); // 3–8
+        const ps = s.polyShape ?? 'random';
+        if (ps === 'random') {
+          this._polySideTarget = 3 + Math.floor(Math.random() * 6); // 3–8
+        }
         this._polyMorphT = 0;
       }
-    }
-
-    for (let i = this._shockwaves.length - 1; i >= 0; i--) {
-      const sw = this._shockwaves[i];
-      sw.r       += sw.speed * dt;
-      sw.opacity -= dt * 1.8;
-      if (sw.opacity <= 0) this._shockwaves.splice(i, 1);
     }
 
     if (mode !== this._prevMode) {
@@ -176,7 +167,11 @@ export class Visualizer {
       if (mode === 'rings')   this._ringWaves   = [];
       if (mode === 'spiral')  this._spiralPoints = [];
       if (mode === 'tunnel')  this._tunnelRings  = [];
-      if (mode === 'polygon') { this._polyMorphT = 0; this._polySides = 3; this._polySideTarget = 3; }
+      if (mode === 'polygon') {
+        const ps = (window.VIZ_SETTINGS.polyShape ?? 'random');
+        const initSides = ps === 'random' ? 3 : parseInt(ps, 10);
+        this._polyMorphT = 0; this._polySides = initSides; this._polySideTarget = initSides;
+      }
       this._prevMode = mode;
     }
 
@@ -574,25 +569,6 @@ export class Visualizer {
   // - Reactive line thickness that explodes on beats
   // - Waveform data layered inside the figure
 
-  _spawnLissParticles(bands, s) {
-    if (s.particles === 'off') return;
-    const base  = s.particles === 'high' ? 20 : 8;
-    const count = Math.round(base * (0.5 + bands.bass * 0.5) * s.reactivity);
-    const n     = Math.min(count, MAX_LISS_PARTICLES - this._lissParticles.length);
-    for (let i = 0; i < n; i++) {
-      const a   = Math.random() * TWO_PI;
-      const spd = 65 + Math.random() * 200 * (0.4 + bands.mid * 0.6);
-      this._lissParticles.push({
-        x: 0, y: 0,
-        vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
-        life:  1,
-        decay: 0.40 + Math.random() * 0.50,
-        size:  1.4 + Math.random() * 3,
-        hue:   (this.hue + (Math.random() - 0.5) * 70 + 360) % 360,
-      });
-    }
-  }
-
   _drawLissajous(freqData, timeData, bands, dt) {
     const { ctx, canvas } = this;
     const W  = canvas.width, H = canvas.height;
@@ -630,25 +606,15 @@ export class Visualizer {
       this._curveHueOffsets[i] = (this._curveHueOffsets[i] + (8 + i * 5) * dt) % 360;
     }
 
-    // ── Animate particles ──────────────────────────────────────────────────
-    const drag = Math.pow(0.92, dt * 60);
-    for (let i = this._lissParticles.length - 1; i >= 0; i--) {
-      const p = this._lissParticles[i];
-      p.x  += p.vx * dt; p.y  += p.vy * dt;
-      p.vx *= drag;       p.vy *= drag;
-      p.life -= p.decay * dt;
-      if (p.life <= 0) this._lissParticles.splice(i, 1);
-    }
-
     const energy   = bands.mid + bands.bass * 0.5;
     const baseR    = Math.min(W, H) * 0.36;
     const amp      = baseR * (0.55 + energy * 0.45);
     const sat      = 55 + energy * 40;
     // Line width explodes on beat, thin on quiet
     const lineW    = (1.0 + energy * 2.5) * (1 + this._beatPulse * 3.5 * r);
-    const SYM      = s.symmetry;
+    const SYM      = Math.max(1, s.symmetry);
     const nCurves  = Math.min(s.curveCount ?? 2, this.curves.length);
-    const steps    = Math.max(10, Math.min(CURVE_STEPS, s.lissSteps ?? CURVE_STEPS));
+    const steps    = Math.max(5, Math.min(50, s.lissSteps ?? CURVE_STEPS));
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -695,29 +661,10 @@ export class Visualizer {
         ctx.stroke();
       });
 
-      if (s.particles !== 'off') {
-        const pLight = 58 + energy * 22;
-        for (const p of this._lissParticles) {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * p.life, 0, TWO_PI);
-          ctx.fillStyle = `hsla(${p.hue},88%,${pLight}%,${p.life * 0.92})`;
-          ctx.fill();
-        }
-      }
-
       ctx.restore();
     }
 
     ctx.restore();
-
-    // Shockwaves centered on drifted position
-    for (const sw of this._shockwaves) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, sw.r, 0, TWO_PI);
-      ctx.strokeStyle = `hsla(${sw.hue},90%,76%,${sw.opacity})`;
-      ctx.lineWidth   = 2.5;
-      ctx.stroke();
-    }
   }
 
   // ── Mode 7: Blob ──────────────────────────────────────────────────────────
@@ -886,19 +833,11 @@ export class Visualizer {
       ctx.stroke();
     }
 
-    // Shockwaves on beat
-    for (const sw of this._shockwaves) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, sw.r, 0, TWO_PI);
-      ctx.strokeStyle = `hsla(${sw.hue},90%,76%,${sw.opacity})`;
-      ctx.lineWidth   = 2;
-      ctx.stroke();
-    }
   }
 
   // ── Mode 10: Polygon ──────────────────────────────────────────────────────
   // The waveform rides along morphing polygon outlines (triangle → octagon).
-  // On each beat the polygon morphs to a new random side count.
+  // On each beat the polygon morphs to a new side count (random or fixed).
   // Multiple nested polygons scale with bass/mids. Whole shape rotates.
 
   _drawPolygon(freqData, timeData, bands, dt) {
@@ -914,6 +853,15 @@ export class Visualizer {
 
     // Rotation speeds up with energy
     this._polyRotation += dt * (0.18 + bands.mid * 0.6 * r);
+
+    // If polyShape is fixed, lock target to that value
+    const ps = s.polyShape ?? 'random';
+    if (ps !== 'random') {
+      const fixed = parseInt(ps, 10);
+      this._polySideTarget = fixed;
+      this._polySides      = fixed;
+      this._polyMorphT     = 1;
+    }
 
     // Morph sides smoothly toward target
     this._polyMorphT = Math.min(1, this._polyMorphT + dt * 2.5);
@@ -985,15 +933,6 @@ export class Visualizer {
     }
 
     ctx.globalCompositeOperation = 'source-over';
-
-    // Shockwaves
-    for (const sw of this._shockwaves) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, sw.r, 0, TWO_PI);
-      ctx.strokeStyle = `hsla(${sw.hue},90%,76%,${sw.opacity})`;
-      ctx.lineWidth   = 2;
-      ctx.stroke();
-    }
   }
 
   // ── Mode 11: Tunnel ───────────────────────────────────────────────────────

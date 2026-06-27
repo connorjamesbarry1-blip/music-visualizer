@@ -98,6 +98,8 @@
       <div class="panel-section">
         <div class="panel-label">Symmetry</div>
         <div class="btn-group">
+          <button class="sym-btn" data-sym="1">1×</button>
+          <button class="sym-btn" data-sym="2">2×</button>
           <button class="sym-btn" data-sym="3">3×</button>
           <button class="sym-btn" data-sym="4">4×</button>
           <button class="sym-btn" data-sym="5">5×</button>
@@ -151,13 +153,27 @@
 
       <!-- Lissajous Line Count -->
       <div class="panel-section">
-        <div class="panel-label">Lissajous Lines: <span id="liss-steps-val">1500</span></div>
+        <div class="panel-label">Lissajous Lines: <span id="liss-steps-val">50</span></div>
         <div class="slider-row">
-          <span class="range-cap">10</span>
+          <span class="range-cap">5</span>
           <input type="range" id="liss-steps-slider"
-                 min="10" max="1500" step="10" value="1500"
+                 min="5" max="100" step="1" value="50"
                  aria-label="Lissajous line count">
-          <span class="range-cap">1500</span>
+          <span class="range-cap">100</span>
+        </div>
+      </div>
+
+      <!-- Polygon Shape -->
+      <div class="panel-section">
+        <div class="panel-label">Polygon Shape</div>
+        <div class="btn-group">
+          <button class="polyshape-btn active" data-polyshape="random">Random</button>
+          <button class="polyshape-btn" data-polyshape="3">Triangle</button>
+          <button class="polyshape-btn" data-polyshape="4">Square</button>
+          <button class="polyshape-btn" data-polyshape="5">Pentagon</button>
+          <button class="polyshape-btn" data-polyshape="6">Hexagon</button>
+          <button class="polyshape-btn" data-polyshape="7">Heptagon</button>
+          <button class="polyshape-btn" data-polyshape="8">Octagon</button>
         </div>
       </div>
 
@@ -340,12 +356,21 @@
       });
     });
 
-    // ── Lissajous line count slider ───────────────────────────────────────────
-    window.VIZ_SETTINGS.lissSteps = 1500;
+    // ── Lissajous line count slider (hard cap 50 to prevent lag) ─────────────
+    window.VIZ_SETTINGS.lissSteps = 50;
     document.getElementById('liss-steps-slider').addEventListener('input', (e) => {
-      const n = parseInt(e.target.value, 10);
+      const n = Math.min(parseInt(e.target.value, 10), 50);
       document.getElementById('liss-steps-val').textContent = n;
       window.VIZ_SETTINGS.lissSteps = n;
+    });
+
+    // ── Polygon shape buttons ─────────────────────────────────────────────────
+    window.VIZ_SETTINGS.polyShape = 'random';
+    document.querySelectorAll('.polyshape-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.VIZ_SETTINGS.polyShape = btn.dataset.polyshape;
+        setActive('.polyshape-btn', 'polyshape', btn.dataset.polyshape);
+      });
     });
 
     // ── Kitty Party Time button ───────────────────────────────────────────────

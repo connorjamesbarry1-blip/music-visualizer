@@ -88,7 +88,7 @@
         <div class="slider-row">
           <span class="range-cap">Long</span>
           <input type="range" id="trail-slider"
-                 min="0.01" max="0.25" step="0.005" value="0.09"
+                 min="0.005" max="0.18" step="0.003" value="0.03"
                  aria-label="Trail length">
           <span class="range-cap">Short</span>
         </div>
@@ -179,9 +179,9 @@
   <script>
     // ── Settings state ─────────────────────────────────────────────────────────
     const PRESETS = {
-      chill:    { fadeAlpha: 0.025, curveCount: 1, symmetry: 6,  colorMode: 'cycle',    particles: 'off',  reactivity: 0.4 },
-      balanced: { fadeAlpha: 0.09,  curveCount: 2, symmetry: 6,  colorMode: 'cycle',    particles: 'low',  reactivity: 0.7 },
-      intense:  { fadeAlpha: 0.18,  curveCount: 3, symmetry: 8,  colorMode: 'reactive', particles: 'high', reactivity: 1.0 },
+      chill:    { fadeAlpha: 0.012, curveCount: 1, symmetry: 4,  colorMode: 'cool',     particles: 'off',  reactivity: 0.4 },
+      balanced: { fadeAlpha: 0.03,  curveCount: 2, symmetry: 6,  colorMode: 'cycle',    particles: 'low',  reactivity: 0.7 },
+      intense:  { fadeAlpha: 0.07,  curveCount: 3, symmetry: 6,  colorMode: 'reactive', particles: 'high', reactivity: 1.1 },
     };
 
     // Initialise to Balanced — visualizer.js reads this object every frame.
@@ -227,7 +227,7 @@
 
     // Apply Balanced on load so the UI reflects the default state.
     applyPreset('balanced');
-    window.VIZ_SETTINGS.mode = 'spectrum';
+    window.VIZ_SETTINGS.mode = 'lissajous';
     setActive('.mode-btn', 'mode', 'spectrum');
 
     // ── Preset buttons ─────────────────────────────────────────────────────────

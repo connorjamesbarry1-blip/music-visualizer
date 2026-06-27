@@ -7,13 +7,13 @@
 //   spiral, polygon, tunnel, rings
 
 const TWO_PI             = Math.PI * 2;
-const CURVE_STEPS        = 1500;
+const CURVE_STEPS        = 400;   // was 1500 — reduced for performance
 const CURVE_PERIOD       = Math.PI * 10;
-const MAX_LISS_PARTICLES = 200;
+const MAX_LISS_PARTICLES = 120;   // reduced to lighten per-frame cost
 const BEAT_COOLDOWN_MS   = 200;
 
 window.VIZ_SETTINGS ??= {
-  fadeAlpha:  0.09,
+  fadeAlpha:  0.03,   // slow fade = long neon trails like iTunes
   curveCount: 2,
   symmetry:   6,
   colorMode:  'cycle',
@@ -297,27 +297,11 @@ export class Visualizer {
 
     drawLine(-1, 0.28);
 
-    if (this._beatPulse > 0) {
-      ctx.save();
-      ctx.filter = 'blur(8px)';
-      ctx.beginPath();
-      ctx.moveTo(0, midY + (timeData[0] / 128 - 1) * amp);
-      for (let i = 1; i < len; i++) {
-        const x  = (i / (len - 1)) * W;
-        const y  = midY + (timeData[i]     / 128 - 1) * amp;
-        const px = ((i - 1) / (len - 1)) * W;
-        const py = midY + (timeData[i - 1] / 128 - 1) * amp;
-        ctx.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2);
-      }
-      ctx.lineTo(W, midY + (timeData[len - 1] / 128 - 1) * amp);
-      ctx.strokeStyle = `hsla(${hue},84%,65%,${0.15 * this._beatPulse})`;
-      ctx.lineWidth   = lw * 3;
-      ctx.lineJoin    = 'round';
-      ctx.stroke();
-      ctx.restore();
-    }
-
+    // Beat glow via shadowBlur — cheaper than ctx.filter
+    ctx.shadowColor = `hsla(${hue},100%,70%,0.8)`;
+    ctx.shadowBlur  = this._beatPulse * 22;
     drawLine(1, 0.88);
+    ctx.shadowBlur  = 0;
   }
 
   // ── Mode 3: Radial ─────────────────────────────────────────────────────────
@@ -368,9 +352,9 @@ export class Visualizer {
       const waveHue  = (hue + 180) % 360;
       const lw       = 2 + this._beatPulse * 3 + bands.mid * 2;
 
-      // Glow pass
-      ctx.save();
-      ctx.filter = `blur(${4 + this._beatPulse * 8}px)`;
+      // Single pass with shadowBlur glow — no ctx.filter needed
+      ctx.shadowColor = `hsla(${waveHue},100%,75%,0.9)`;
+      ctx.shadowBlur  = 6 + this._beatPulse * 20;
       ctx.beginPath();
       for (let i = 0; i < timeData.length; i += 2) {
         const angle = (i / timeData.length) * TWO_PI + this._radialAngle;
@@ -381,25 +365,10 @@ export class Visualizer {
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.closePath();
-      ctx.strokeStyle = `hsla(${waveHue},90%,70%,${0.35 + this._beatPulse * 0.3})`;
-      ctx.lineWidth = lw * 2.5;
+      ctx.strokeStyle = `hsla(${waveHue},90%,75%,0.92)`;
+      ctx.lineWidth   = lw;
       ctx.stroke();
-      ctx.restore();
-
-      // Crisp pass
-      ctx.beginPath();
-      for (let i = 0; i < timeData.length; i += 2) {
-        const angle = (i / timeData.length) * TWO_PI + this._radialAngle;
-        const disp  = (timeData[i] / 128 - 1) * waveAmp;
-        const rr    = (waveR + disp) * beatSc;
-        const x = cx + rr * Math.cos(angle);
-        const y = cy + rr * Math.sin(angle);
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      ctx.strokeStyle = `hsla(${waveHue},85%,72%,0.9)`;
-      ctx.lineWidth = lw;
-      ctx.stroke();
+      ctx.shadowBlur  = 0;
 
       // ── Counter-rotating second waveform ring ───────────────────────────
       const waveR2   = innerR * 0.62;
@@ -643,10 +612,10 @@ export class Visualizer {
     const energy   = bands.mid + bands.bass * 0.5;
     const baseR    = Math.min(W, H) * 0.36;
     const amp      = baseR * (0.55 + energy * 0.45);
-    const sat      = 55 + energy * 40;
-    // Line width explodes on beat, thin on quiet
-    const lineW    = (1.0 + energy * 2.5) * (1 + this._beatPulse * 3.5 * r);
-    const SYM      = s.symmetry;
+    const sat      = 72 + energy * 28;             // richer saturation
+    const lineW    = (1.2 + energy * 2.0) * (1 + this._beatPulse * 2.5 * r);
+    // Cap symmetry at 6 in Lissajous — higher values cost too much per frame
+    const SYM      = Math.min(s.symmetry, 6);
     const nCurves  = Math.min(s.curveCount ?? 2, this.curves.length);
 
     ctx.save();
@@ -659,29 +628,14 @@ export class Visualizer {
       if (sym % 2 === 1) ctx.scale(1, -1);
 
       this.curves.slice(0, nCurves).forEach((c, ci) => {
-        // Each arm + each curve gets its own independently cycling hue
         const cHue  = (hue + this._curveHueOffsets[ci] + sym * (360 / SYM) * 0.4) % 360;
-        const light = 36 + energy * 22 + this._beatPulse * 26;
-        const alpha = 0.50 + this._beatPulse * 0.34;
+        const light = 55 + energy * 20 + this._beatPulse * 22;  // brighter base
+        const alpha = 0.72 + this._beatPulse * 0.28;
 
-        // Glow pass on beat
-        if (this._beatPulse > 0.3) {
-          ctx.save();
-          ctx.filter = `blur(${this._beatPulse * 6}px)`;
-          ctx.beginPath();
-          for (let i = 0; i <= CURVE_STEPS; i++) {
-            const t = (i / CURVE_STEPS) * CURVE_PERIOD;
-            const x = amp * Math.sin(c.a * t + c.phase);
-            const y = amp * Math.sin(c.b * t);
-            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-          }
-          ctx.strokeStyle = `hsla(${cHue},${sat}%,${light}%,${alpha * 0.4})`;
-          ctx.lineWidth   = lineW * 3;
-          ctx.stroke();
-          ctx.restore();
-        }
+        // Single draw pass — use shadowBlur for glow (no ctx.filter, no extra path)
+        ctx.shadowColor = `hsla(${cHue},100%,70%,0.9)`;
+        ctx.shadowBlur  = 8 + this._beatPulse * 18 * r;
 
-        // Crisp pass
         ctx.beginPath();
         for (let i = 0; i <= CURVE_STEPS; i++) {
           const t = (i / CURVE_STEPS) * CURVE_PERIOD;
@@ -692,6 +646,8 @@ export class Visualizer {
         ctx.strokeStyle = `hsla(${cHue},${sat}%,${light}%,${alpha})`;
         ctx.lineWidth   = lineW;
         ctx.stroke();
+
+        ctx.shadowBlur = 0; // reset after each stroke
       });
 
       if (s.particles !== 'off') {
@@ -869,20 +825,13 @@ export class Visualizer {
 
       const lw = 1.8 + bands.bass * 3 * r + this._beatPulse * 2.5;
 
-      // Glow
-      ctx.save();
-      ctx.filter = `blur(${3 + this._beatPulse * 6}px)`;
-      ctx.strokeStyle = `hsla(${armHue},85%,65%,${0.25 + this._beatPulse * 0.25})`;
-      ctx.lineWidth   = lw * 2.5;
-      ctx.lineJoin    = 'round';
-      ctx.stroke();
-      ctx.restore();
-
-      // Crisp
-      ctx.strokeStyle = `hsla(${armHue},80%,68%,0.88)`;
+      ctx.shadowColor = `hsla(${armHue},100%,70%,0.9)`;
+      ctx.shadowBlur  = 8 + this._beatPulse * 20 * r;
+      ctx.strokeStyle = `hsla(${armHue},88%,70%,0.9)`;
       ctx.lineWidth   = lw;
       ctx.lineJoin    = 'round';
       ctx.stroke();
+      ctx.shadowBlur  = 0;
     }
 
     // Shockwaves on beat
@@ -969,18 +918,12 @@ export class Visualizer {
       }
       ctx.closePath();
 
-      if (layer === LAYERS && this._beatPulse > 0.3) {
-        ctx.save();
-        ctx.filter = `blur(${this._beatPulse * 8}px)`;
-        ctx.strokeStyle = `hsla(${layerHue},90%,70%,${this._beatPulse * 0.4})`;
-        ctx.lineWidth   = lw * 3;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      ctx.strokeStyle = `hsla(${layerHue},82%,62%,${layerAlpha})`;
+      ctx.shadowColor = `hsla(${layerHue},100%,72%,0.9)`;
+      ctx.shadowBlur  = layer === LAYERS ? (6 + this._beatPulse * 22 * r) : (2 + this._beatPulse * 8);
+      ctx.strokeStyle = `hsla(${layerHue},88%,65%,${layerAlpha})`;
       ctx.lineWidth   = lw;
       ctx.stroke();
+      ctx.shadowBlur  = 0;
     }
 
     ctx.globalCompositeOperation = 'source-over';

@@ -109,6 +109,26 @@ export class Visualizer {
     window.removeEventListener('resize', this._onResize);
   }
 
+  // ── Fade helper ─────────────────────────────────────────────────────────────
+  // Ensures composite op is source-over before fading so screen-blended
+  // content actually fades to pure black.  When the slider is at max (≥0.148)
+  // skip the fade entirely so colours persist forever.
+  // minAlpha lets modes that need faster clearing set a floor.
+  _applyFade(minAlpha = 0) {
+    const { ctx, canvas } = this;
+    const s = window.VIZ_SETTINGS;
+    const alpha = Math.max(s.fadeAlpha, minAlpha);
+    // Max slider value is 0.15 — treat anything near that as "no fade"
+    if (alpha >= 0.148) return;
+    const prev = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'source-over';
+    // Use a stronger alpha floor to prevent grey residue
+    const effective = Math.max(alpha * 2.5, 0.06);
+    ctx.fillStyle = `rgba(0,0,0,${effective})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = prev;
+  }
+
   _resize() {
     const W = window.innerWidth, H = window.innerHeight;
     this.canvas.width  = W;
@@ -220,8 +240,7 @@ export class Visualizer {
     const W = canvas.width, H = canvas.height;
     const s = window.VIZ_SETTINGS;
 
-    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade();
 
     const BAR_COUNT = 128;
     const barW  = W / BAR_COUNT;
@@ -264,8 +283,7 @@ export class Visualizer {
     const W = canvas.width, H = canvas.height;
     const s = window.VIZ_SETTINGS;
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.055)})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade(0.055);
 
     const len  = timeData.length;
     const midY = H / 2;
@@ -324,8 +342,7 @@ export class Visualizer {
     const cx = W / 2, cy = H / 2;
     const s  = window.VIZ_SETTINGS;
 
-    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade();
 
     this._radialAngle  = (this._radialAngle  + 0.20 * dt) % TWO_PI;
     this._radialAngle2 = (this._radialAngle2 - 0.13 * dt + TWO_PI) % TWO_PI;
@@ -512,8 +529,7 @@ export class Visualizer {
     const r = s.reactivity;
     const hue = this._dHue();
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.04)})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade(0.04);
 
     if (bands.bass > 0.45) {
       const n = Math.ceil((bands.bass - 0.45) * 6 * r);
@@ -576,8 +592,7 @@ export class Visualizer {
     const hue = this._dHue();
     const r   = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade();
 
     // ── Drift the whole figure gently around the screen ───────────────────
     const driftAmp = Math.min(W, H) * 0.12;
@@ -677,8 +692,7 @@ export class Visualizer {
     const hue = this._dHue();
     const r = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade();
 
     const baseRadius = Math.min(W, H) * 0.25;
     this._blobPhase += dt * (1.5 + bands.mid * 2);
@@ -722,8 +736,7 @@ export class Visualizer {
     const hue = this._dHue();
     const r = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.08)})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade(0.08);
 
     const maxR  = Math.min(W, H) * 0.45;
     const innerR = maxR * 0.1;
@@ -786,8 +799,7 @@ export class Visualizer {
     const hue = this._dHue();
     const r   = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.06)})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade(0.06);
 
     // Spiral rotation speeds up with mids
     this._spiralAngle += dt * (0.15 + bands.mid * 0.5 * r);
@@ -848,8 +860,7 @@ export class Visualizer {
     const hue = this._dHue();
     const r   = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.07)})`;
-    ctx.fillRect(0, 0, W, H);
+    this._applyFade(0.07);
 
     // Rotation speeds up with energy
     this._polyRotation += dt * (0.18 + bands.mid * 0.6 * r);
@@ -949,9 +960,8 @@ export class Visualizer {
     const hue = this._dHue();
     const r   = s.reactivity;
 
-    // Solid black background — tunnel needs depth
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(0, 0, W, H);
+    // Tunnel needs heavier fade for depth effect
+    this._applyFade(0.22);
 
     // Fall speed: bass drives it, beat gives a lurch
     const fallSpeed = 0.8 + bands.bass * 2.5 * r + this._beatPulse * 2.0 * r;

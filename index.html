@@ -72,7 +72,7 @@
           <button class="mode-btn" data-mode="waveform">Waveform</button>
           <button class="mode-btn" data-mode="radial">Radial</button>
           <button class="mode-btn" data-mode="terrain">Terrain</button>
-          <button class="mode-btn" data-mode="fractal">Fractal</button>
+          <!-- Fractal mode removed -->
           <button class="mode-btn" data-mode="lissajous">Lissajous</button>
           <button class="mode-btn" data-mode="blob">Blob</button>
           <button class="mode-btn" data-mode="rings">Rings</button>
@@ -116,7 +116,7 @@
         </div>
       </div>
 
-      <!-- Fractal Depth -->
+      <!-- Fractal Depth & Type — disabled
       <div class="panel-section">
         <div class="panel-label">Fractal Depth</div>
         <div class="btn-group">
@@ -125,8 +125,6 @@
           <button class="fractal-btn" data-fractal="4">Deep</button>
         </div>
       </div>
-
-      <!-- Fractal Type -->
       <div class="panel-section">
         <div class="panel-label">Fractal Type</div>
         <div class="btn-group">
@@ -137,6 +135,7 @@
           <button class="fractaltype-btn" data-fractaltype="dragon">Dragon</button>
         </div>
       </div>
+      end fractal settings -->
 
       <!-- Reactivity -->
       <div class="panel-section">
@@ -150,23 +149,63 @@
         </div>
       </div>
 
+      <!-- Lissajous Line Count -->
+      <div class="panel-section">
+        <div class="panel-label">Lissajous Lines: <span id="liss-steps-val">1500</span></div>
+        <div class="slider-row">
+          <span class="range-cap">10</span>
+          <input type="range" id="liss-steps-slider"
+                 min="10" max="1500" step="10" value="1500"
+                 aria-label="Lissajous line count">
+          <span class="range-cap">1500</span>
+        </div>
+      </div>
+
       <!-- Tempo readout -->
       <div class="panel-section">
         <div class="panel-label">Tempo</div>
         <div id="bpm-display" class="bpm-display">— BPM</div>
       </div>
 
-      <!-- Cat Mode -->
+      <!-- Kitty Party Time -->
       <div class="panel-section">
-        <div class="panel-label">Cat Mode</div>
-        <button id="cat-mode-btn" class="cat-toggle-btn">🐾 Cats: OFF</button>
+        <div class="panel-label">Kitty Party Time</div>
+        <button id="cat-mode-btn" class="cat-toggle-btn">🐾 Party: OFF</button>
+
         <div class="panel-label cat-count-label">Count: <span id="cat-count-val">4</span></div>
         <div class="slider-row">
           <span class="range-cap">1</span>
           <input type="range" id="cat-count-slider"
-                 min="1" max="8" step="1" value="4"
+                 min="1" max="100" step="1" value="4"
                  aria-label="Cat count">
-          <span class="range-cap">8</span>
+          <span class="range-cap">100</span>
+        </div>
+
+        <div class="panel-label" style="margin-top:0.5rem;">Dance Type</div>
+        <div class="btn-group">
+          <button class="dance-btn active" data-dance="random">Random</button>
+          <button class="dance-btn" data-dance="bounce">Bounce</button>
+          <button class="dance-btn" data-dance="sidestep">Sidestep</button>
+          <button class="dance-btn" data-dance="spin">Spin</button>
+          <button class="dance-btn" data-dance="headbang">Headbang</button>
+          <button class="dance-btn" data-dance="wiggle">Wiggle</button>
+          <button class="dance-btn" data-dance="backflip">Backflip</button>
+          <button class="dance-btn" data-dance="moonwalk">Moonwalk</button>
+          <button class="dance-btn" data-dance="twerk">Twerk</button>
+          <button class="dance-btn" data-dance="macarena">Macarena</button>
+          <button class="dance-btn" data-dance="wave">Wave</button>
+        </div>
+
+        <div class="panel-label" style="margin-top:0.5rem;">Roam</div>
+        <button id="cat-roam-btn" class="cat-toggle-btn">🚶 Roam: OFF</button>
+
+        <div class="panel-label" style="margin-top:0.5rem;">Roam Speed: <span id="cat-speed-val">50</span>%</div>
+        <div class="slider-row">
+          <span class="range-cap">Slow</span>
+          <input type="range" id="cat-speed-slider"
+                 min="10" max="200" step="5" value="50"
+                 aria-label="Cat roam speed">
+          <span class="range-cap">Fast</span>
         </div>
       </div>
 
@@ -191,9 +230,9 @@
   <script>
     // ── Settings state ─────────────────────────────────────────────────────────
     const PRESETS = {
-      chill:    { fadeAlpha: 0.012, curveCount: 1, symmetry: 3, colorMode: 'cool',     fractalDepth: 2, reactivity: 0.4 },
-      balanced: { fadeAlpha: 0.03,  curveCount: 2, symmetry: 4, colorMode: 'cycle',    fractalDepth: 3, reactivity: 0.7 },
-      intense:  { fadeAlpha: 0.07,  curveCount: 3, symmetry: 6, colorMode: 'reactive', fractalDepth: 4, reactivity: 1.1 },
+      chill:    { fadeAlpha: 0.012, curveCount: 1, symmetry: 3, colorMode: 'cool',     reactivity: 0.4 },
+      balanced: { fadeAlpha: 0.03,  curveCount: 2, symmetry: 4, colorMode: 'cycle',    reactivity: 0.7 },
+      intense:  { fadeAlpha: 0.07,  curveCount: 3, symmetry: 6, colorMode: 'reactive', reactivity: 1.1 },
     };
 
     // Initialise to Balanced — visualizer.js reads this object every frame.
@@ -234,7 +273,6 @@
       setActive('.preset-btn',   'preset',   name);
       setActive('.sym-btn',      'sym',      PRESETS[name].symmetry);
       setActive('.color-btn',    'color',    PRESETS[name].colorMode);
-      setActive('.fractal-btn',  'fractal',  PRESETS[name].fractalDepth);
     }
 
     // Apply Balanced on load so the UI reflects the default state.
@@ -271,25 +309,22 @@
       });
     });
 
-    // ── Fractal depth buttons ──────────────────────────────────────────────────
-    document.querySelectorAll('.fractal-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        window.VIZ_SETTINGS.fractalDepth = parseInt(btn.dataset.fractal, 10);
-        setActive('.fractal-btn', 'fractal', btn.dataset.fractal);
-        setActive('.preset-btn', 'preset', null);
-      });
-    });
-
-    // ── Fractal type buttons ───────────────────────────────────────────────────
-    document.querySelectorAll('.fractaltype-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        window.VIZ_SETTINGS.fractalType = btn.dataset.fractaltype;
-        setActive('.fractaltype-btn', 'fractaltype', btn.dataset.fractaltype);
-      });
-    });
-    // Set default active
-    window.VIZ_SETTINGS.fractalType = 'tree';
-    setActive('.fractaltype-btn', 'fractaltype', 'tree');
+    // ── Fractal depth/type buttons — disabled
+    // document.querySelectorAll('.fractal-btn').forEach(btn => {
+    //   btn.addEventListener('click', () => {
+    //     window.VIZ_SETTINGS.fractalDepth = parseInt(btn.dataset.fractal, 10);
+    //     setActive('.fractal-btn', 'fractal', btn.dataset.fractal);
+    //     setActive('.preset-btn', 'preset', null);
+    //   });
+    // });
+    // document.querySelectorAll('.fractaltype-btn').forEach(btn => {
+    //   btn.addEventListener('click', () => {
+    //     window.VIZ_SETTINGS.fractalType = btn.dataset.fractaltype;
+    //     setActive('.fractaltype-btn', 'fractaltype', btn.dataset.fractaltype);
+    //   });
+    // });
+    // window.VIZ_SETTINGS.fractalType = 'tree';
+    // setActive('.fractaltype-btn', 'fractaltype', 'tree');
 
     // ── Reactivity slider ──────────────────────────────────────────────────────
     reactSlider.addEventListener('input', () => {
@@ -305,7 +340,15 @@
       });
     });
 
-    // ── Cat mode button ────────────────────────────────────────────────────────
+    // ── Lissajous line count slider ───────────────────────────────────────────
+    window.VIZ_SETTINGS.lissSteps = 1500;
+    document.getElementById('liss-steps-slider').addEventListener('input', (e) => {
+      const n = parseInt(e.target.value, 10);
+      document.getElementById('liss-steps-val').textContent = n;
+      window.VIZ_SETTINGS.lissSteps = n;
+    });
+
+    // ── Kitty Party Time button ───────────────────────────────────────────────
     document.getElementById('cat-mode-btn').addEventListener('click', () => {
       if (window.toggleCatMode) window.toggleCatMode();
     });
@@ -315,6 +358,26 @@
       const n = parseInt(e.target.value, 10);
       document.getElementById('cat-count-val').textContent = n;
       if (window.setCatCount) window.setCatCount(n);
+    });
+
+    // ── Dance type buttons ─────────────────────────────────────────────────────
+    document.querySelectorAll('.dance-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setActive('.dance-btn', 'dance', btn.dataset.dance);
+        if (window.setCatDance) window.setCatDance(btn.dataset.dance);
+      });
+    });
+
+    // ── Cat roam toggle ────────────────────────────────────────────────────────
+    document.getElementById('cat-roam-btn').addEventListener('click', () => {
+      if (window.toggleCatRoam) window.toggleCatRoam();
+    });
+
+    // ── Cat roam speed slider ──────────────────────────────────────────────────
+    document.getElementById('cat-speed-slider').addEventListener('input', (e) => {
+      const n = parseInt(e.target.value, 10);
+      document.getElementById('cat-speed-val').textContent = n;
+      if (window.setCatSpeed) window.setCatSpeed(n);
     });
   </script>
 

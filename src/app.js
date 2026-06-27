@@ -89,13 +89,31 @@ window.toggleCatMode = function () {
   }
 
   if (btn) {
-    btn.textContent = entering ? '🐾 Cats: ON' : '🐾 Cats: OFF';
+    btn.textContent = entering ? '🐾 Party: ON' : '🐾 Party: OFF';
     btn.classList.toggle('active', entering);
   }
 };
 
 window.setCatCount = function (n) {
   catMode.setCatCount(n);
+};
+
+window.setCatDance = function (type) {
+  catMode.setDanceType(type);
+};
+
+window.toggleCatRoam = function () {
+  const entering = !catMode._roaming;
+  catMode.setRoaming(entering);
+  const btn = document.getElementById('cat-roam-btn');
+  if (btn) {
+    btn.textContent = entering ? '🚶 Roam: ON' : '🚶 Roam: OFF';
+    btn.classList.toggle('active', entering);
+  }
+};
+
+window.setCatSpeed = function (pct) {
+  catMode.setRoamSpeed(pct);
 };
 
 // ── RAF loop ──────────────────────────────────────────────────────────────────

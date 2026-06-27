@@ -72,7 +72,7 @@
           <button class="mode-btn" data-mode="waveform">Waveform</button>
           <button class="mode-btn" data-mode="radial">Radial</button>
           <button class="mode-btn" data-mode="terrain">Terrain</button>
-          <button class="mode-btn" data-mode="particles">Particles</button>
+          <button class="mode-btn" data-mode="fractal">Fractal</button>
           <button class="mode-btn" data-mode="lissajous">Lissajous</button>
           <button class="mode-btn" data-mode="blob">Blob</button>
           <button class="mode-btn" data-mode="rings">Rings</button>
@@ -88,7 +88,7 @@
         <div class="slider-row">
           <span class="range-cap">Long</span>
           <input type="range" id="trail-slider"
-                 min="0.005" max="0.18" step="0.003" value="0.03"
+                 min="0.005" max="0.15" step="0.003" value="0.03"
                  aria-label="Trail length">
           <span class="range-cap">Short</span>
         </div>
@@ -98,10 +98,10 @@
       <div class="panel-section">
         <div class="panel-label">Symmetry</div>
         <div class="btn-group">
+          <button class="sym-btn" data-sym="3">3×</button>
           <button class="sym-btn" data-sym="4">4×</button>
+          <button class="sym-btn" data-sym="5">5×</button>
           <button class="sym-btn" data-sym="6">6×</button>
-          <button class="sym-btn" data-sym="8">8×</button>
-          <button class="sym-btn" data-sym="12">12×</button>
         </div>
       </div>
 
@@ -116,13 +116,13 @@
         </div>
       </div>
 
-      <!-- Particles -->
+      <!-- Fractal Depth -->
       <div class="panel-section">
-        <div class="panel-label">Particles</div>
+        <div class="panel-label">Fractal Depth</div>
         <div class="btn-group">
-          <button class="particle-btn" data-particles="off">Off</button>
-          <button class="particle-btn" data-particles="low">Low</button>
-          <button class="particle-btn" data-particles="high">High</button>
+          <button class="fractal-btn" data-fractal="2">Shallow</button>
+          <button class="fractal-btn" data-fractal="3">Medium</button>
+          <button class="fractal-btn" data-fractal="4">Deep</button>
         </div>
       </div>
 
@@ -179,9 +179,9 @@
   <script>
     // ── Settings state ─────────────────────────────────────────────────────────
     const PRESETS = {
-      chill:    { fadeAlpha: 0.012, curveCount: 1, symmetry: 4,  colorMode: 'cool',     particles: 'off',  reactivity: 0.4 },
-      balanced: { fadeAlpha: 0.03,  curveCount: 2, symmetry: 6,  colorMode: 'cycle',    particles: 'low',  reactivity: 0.7 },
-      intense:  { fadeAlpha: 0.07,  curveCount: 3, symmetry: 6,  colorMode: 'reactive', particles: 'high', reactivity: 1.1 },
+      chill:    { fadeAlpha: 0.012, curveCount: 1, symmetry: 3, colorMode: 'cool',     fractalDepth: 2, reactivity: 0.4 },
+      balanced: { fadeAlpha: 0.03,  curveCount: 2, symmetry: 4, colorMode: 'cycle',    fractalDepth: 3, reactivity: 0.7 },
+      intense:  { fadeAlpha: 0.07,  curveCount: 3, symmetry: 6, colorMode: 'reactive', fractalDepth: 4, reactivity: 1.1 },
     };
 
     // Initialise to Balanced — visualizer.js reads this object every frame.
@@ -219,16 +219,16 @@
       Object.assign(window.VIZ_SETTINGS, PRESETS[name]);
       trailSlider.value = PRESETS[name].fadeAlpha;
       reactSlider.value = PRESETS[name].reactivity;
-      setActive('.preset-btn',   'preset',    name);
-      setActive('.sym-btn',      'sym',       PRESETS[name].symmetry);
-      setActive('.color-btn',    'color',     PRESETS[name].colorMode);
-      setActive('.particle-btn', 'particles', PRESETS[name].particles);
+      setActive('.preset-btn',   'preset',   name);
+      setActive('.sym-btn',      'sym',      PRESETS[name].symmetry);
+      setActive('.color-btn',    'color',    PRESETS[name].colorMode);
+      setActive('.fractal-btn',  'fractal',  PRESETS[name].fractalDepth);
     }
 
     // Apply Balanced on load so the UI reflects the default state.
     applyPreset('balanced');
     window.VIZ_SETTINGS.mode = 'lissajous';
-    setActive('.mode-btn', 'mode', 'spectrum');
+    setActive('.mode-btn', 'mode', 'lissajous');
 
     // ── Preset buttons ─────────────────────────────────────────────────────────
     document.querySelectorAll('.preset-btn').forEach(btn => {
@@ -259,11 +259,11 @@
       });
     });
 
-    // ── Particle buttons ───────────────────────────────────────────────────────
-    document.querySelectorAll('.particle-btn').forEach(btn => {
+    // ── Fractal depth buttons ──────────────────────────────────────────────────
+    document.querySelectorAll('.fractal-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        window.VIZ_SETTINGS.particles = btn.dataset.particles;
-        setActive('.particle-btn', 'particles', btn.dataset.particles);
+        window.VIZ_SETTINGS.fractalDepth = parseInt(btn.dataset.fractal, 10);
+        setActive('.fractal-btn', 'fractal', btn.dataset.fractal);
         setActive('.preset-btn', 'preset', null);
       });
     });

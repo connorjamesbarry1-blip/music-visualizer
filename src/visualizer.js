@@ -10,13 +10,15 @@ const TWO_PI           = Math.PI * 2;
 const CURVE_STEPS      = 150;   // low enough to stay smooth at 6× symmetry
 const CURVE_PERIOD     = Math.PI * 10;
 const BEAT_COOLDOWN_MS = 200;
+const BRANCH_STEPS     = 20;   // waveform steps per fractal branch
 
 window.VIZ_SETTINGS ??= {
   fadeAlpha:    0.03,
   curveCount:   2,
   symmetry:     4,
   colorMode:    'cycle',
-  fractalDepth: 3,        // replaces 'particles' — depth 2/3/4
+  fractalDepth: 3,        // depth 2/3/4
+  fractalType:  'tree',   // tree, snowflake, sierpinski, fern, dragon
   reactivity:   0.7,
   mode:         'lissajous',
 };
@@ -91,6 +93,9 @@ export class Visualizer {
 
     // Fractal
     this._fractalPhase = 0;
+    // Dragon curve precomputed sequence
+    this._dragonSeq = null;
+    this._dragonDepth = 0;
 
     this._onResize = () => this._resize();
     window.addEventListener('resize', this._onResize);
@@ -166,13 +171,13 @@ export class Visualizer {
       case 'radial':    this._drawRadial(freqData, timeData, bands, dt);    break;
       case 'terrain':   this._drawTerrain(freqData);                        break;
       case 'fractal':   this._drawFractal(freqData, timeData, bands, dt);   break;
-      case 'lissajous': this._drawLissajous(bands, dt);                     break;
-      case 'blob':      this._drawBlob(freqData, bands, dt);                break;
-      case 'rings':     this._drawRings(freqData, bands, dt);               break;
+      case 'lissajous': this._drawLissajous(timeData, bands, dt);           break;
+      case 'blob':      this._drawBlob(timeData, bands, dt);                break;
+      case 'rings':     this._drawRings(freqData, timeData, bands, dt);     break;
       case 'spiral':    this._drawSpiral(freqData, timeData, bands, dt);    break;
       case 'polygon':   this._drawPolygon(freqData, timeData, bands, dt);   break;
-      case 'tunnel':    this._drawTunnel(freqData, bands, dt);              break;
-      default:          this._drawLissajous(bands, dt);
+      case 'tunnel':    this._drawTunnel(freqData, timeData, bands, dt);    break;
+      default:          this._drawLissajous(timeData, bands, dt);
     }
   }
 
@@ -200,6 +205,19 @@ export class Visualizer {
     return this.hue; // cycle
   }
 
+  // ── Fade helper — ALWAYS in source-over, never in screen mode ─────────────
+  // Call this BEFORE switching to 'screen' composite for drawing.
+  _applyFade(W, H) {
+    const s = window.VIZ_SETTINGS;
+    const { ctx } = this;
+    // Reset to source-over before the fade rect — critical so we never paint
+    // the fade rect while in 'screen' mode (which causes grey trails).
+    ctx.globalCompositeOperation = 'source-over';
+    const fa = Math.max(s.fadeAlpha * 2.5, 0.08);
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(fa, 1)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
   // ── Mode 1: Spectrum ───────────────────────────────────────────────────────
 
   _drawSpectrum(freqData, bands, dt) {
@@ -207,12 +225,15 @@ export class Visualizer {
     const W = canvas.width, H = canvas.height;
     const s = window.VIZ_SETTINGS;
 
+    // Fade using direct source-over (spectrum stays source-over throughout)
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
     ctx.fillRect(0, 0, W, H);
 
     const BAR_COUNT = 128;
     const barW  = W / BAR_COUNT;
     const hue   = this._dHue();
+    const cx    = W / 2;
     const pulse = 1 + this._beatPulse * 0.30;
 
     for (let i = 0; i < BAR_COUNT; i++) {
@@ -220,9 +241,11 @@ export class Visualizer {
       const binIdx = Math.floor(t * Math.min(freqData.length, 512) * 0.72);
       const val    = freqData[binIdx] / 255;
       const barH   = val * H * 0.88 * pulse;
-      // Color flows outward from center — hue shifts with bar height
-      const barHue = (hue + t * 60 + val * 40) % 360;
-      const light  = 40 + val * 45;
+
+      // Color flows outward from center — distance from center bar
+      const distFrac = Math.abs(i - BAR_COUNT / 2) / (BAR_COUNT / 2);
+      const barHue  = (hue + distFrac * 80 + val * 40) % 360;
+      const light   = 40 + distFrac * 45;
 
       let bx = i * barW, bw = barW - 1;
       if (i < 14 && bands.bass > 0.62) {
@@ -231,7 +254,6 @@ export class Visualizer {
         bx -= bloom * barW * 0.7;
       }
 
-      // Glow only on outer (top) edge via shadowBlur
       ctx.shadowColor = `hsla(${barHue},100%,70%,0.8)`;
       ctx.shadowBlur  = 6 + val * 10;
       ctx.fillStyle   = `hsla(${barHue},82%,${light}%,${0.55 + val * 0.45})`;
@@ -255,6 +277,7 @@ export class Visualizer {
     const W = canvas.width, H = canvas.height;
     const s = window.VIZ_SETTINGS;
 
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.04)})`;
     ctx.fillRect(0, 0, W, H);
 
@@ -263,6 +286,7 @@ export class Visualizer {
     const amp  = H * 0.36;
     const lw   = 2.5 + bands.bass * 4 + this._beatPulse * 2.5;
     const hue  = this._dHue();
+    const cx   = W / 2;
 
     const drawLine = (yScale, opacity) => {
       ctx.beginPath();
@@ -297,6 +321,7 @@ export class Visualizer {
     const s  = window.VIZ_SETTINGS;
     const r  = s.reactivity;
 
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
     ctx.fillRect(0, 0, W, H);
 
@@ -316,9 +341,9 @@ export class Visualizer {
       const startA = i * sliceA + this._radialAngle;
       const endA   = startA + sliceA;
       const outerR = Math.max(innerR + 1, (innerR + val * (maxR - innerR)) * pulse);
-      // Color flows outward: hue shifts by radius distance
-      const barHue = (hue + (i / BARS) * 80 + val * 30) % 360;
-      const light  = 35 + val * 45;
+      const distFrac = outerR / maxR;
+      const barHue   = (hue + distFrac * 80 + val * 30) % 360;
+      const light    = 35 + distFrac * 45;
       ctx.beginPath();
       ctx.arc(cx, cy, outerR, startA, endA);
       ctx.arc(cx, cy, innerR, endA, startA, true);
@@ -334,7 +359,6 @@ export class Visualizer {
       const waveHue = (hue + 180) % 360;
       const lw      = 2 + this._beatPulse * 3 + bands.mid * 2;
 
-      // Primary waveform ring — shadowBlur for outer glow only
       ctx.shadowColor = `hsla(${waveHue},100%,75%,0.9)`;
       ctx.shadowBlur  = 6 + this._beatPulse * 20;
       ctx.beginPath();
@@ -412,106 +436,58 @@ export class Visualizer {
     ctx.drawImage(tb, 0, 0);
   }
 
-  // ── Mode 5: Fractal waveform ───────────────────────────────────────────────
-  // Recursive branching tree where each branch is driven by the waveform.
-  // fractalDepth (2/3/4) controls recursion depth — kept safe for JS perf.
-  // Color flows outward from root: warm at base, bright at tips.
+  // ── Fractal branch drawing helper ──────────────────────────────────────────
+  // Draws a branch as a waveform-displaced path from (x,y) to (x2,y2).
+  // wi = starting waveform index offset, timeData = raw byte array, reactivity = r
+  _drawBranch(x, y, x2, y2, wi, timeData, reactivity) {
+    const { ctx } = this;
+    const dx  = x2 - x;
+    const dy  = y2 - y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 0.5) return;
+    const perpX = -dy / len;
+    const perpY =  dx / len;
+    ctx.beginPath();
+    for (let step = 0; step <= BRANCH_STEPS; step++) {
+      const t    = step / BRANCH_STEPS;
+      const wIdx = Math.floor((wi * BRANCH_STEPS + step) % timeData.length);
+      const wave = (timeData[wIdx] / 128 - 1) * len * 0.25 * reactivity;
+      const bx   = x + dx * t + perpX * wave;
+      const by   = y + dy * t + perpY * wave;
+      step === 0 ? ctx.moveTo(bx, by) : ctx.lineTo(bx, by);
+    }
+    ctx.stroke();
+  }
+
+  // ── Mode 5: Fractal ───────────────────────────────────────────────────────
 
   _drawFractal(freqData, timeData, bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
-    const s   = window.VIZ_SETTINGS;
-    const hue = this._dHue();
-    const r   = s.reactivity;
-    const depth = Math.max(2, Math.min(4, s.fractalDepth ?? 3));
+    const s      = window.VIZ_SETTINGS;
+    const hue    = this._dHue();
+    const r      = s.reactivity;
+    const depth  = Math.max(2, Math.min(4, s.fractalDepth ?? 3));
+    const ftype  = s.fractalType ?? 'tree';
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.05)})`;
-    ctx.fillRect(0, 0, W, H);
+    // Fade BEFORE switching to screen mode
+    this._applyFade(W, H);
 
     this._fractalPhase += dt * (0.3 + bands.mid * 0.8 * r);
 
-    // Sample waveform into a small array for branch angle offsets
-    const WAVE_SAMPLES = 32;
-    const waveSamples  = new Float32Array(WAVE_SAMPLES);
-    for (let i = 0; i < WAVE_SAMPLES; i++) {
-      const idx = Math.floor((i / WAVE_SAMPLES) * timeData.length);
-      waveSamples[i] = (timeData[idx] / 128 - 1); // -1..1
-    }
-
-    // Sample freq for branch length scaling
-    const FREQ_SAMPLES = 16;
-    const freqSamples  = new Float32Array(FREQ_SAMPLES);
-    for (let i = 0; i < FREQ_SAMPLES; i++) {
-      const idx = Math.floor((i / FREQ_SAMPLES) * Math.min(freqData.length, 128));
-      freqSamples[i] = freqData[idx] / 255;
-    }
-
-    const baseLen = Math.min(W, H) * (0.22 + bands.bass * 0.08 * r);
-    const cx = W / 2;
-    const cy = H * 0.75; // root at bottom-center
-
     ctx.globalCompositeOperation = 'screen';
 
-    // Recursive branch draw — iterative via stack to avoid call-stack issues
-    const stack = [];
-    // Push: x1, y1, angle, length, depth, waveIdx, freqIdx
-    stack.push({ x: cx, y: cy, angle: -Math.PI / 2, len: baseLen, d: depth, wi: 0, fi: 0 });
-
-    let safetyCount = 0;
-    const maxNodes  = depth === 4 ? 400 : depth === 3 ? 180 : 80;
-
-    while (stack.length > 0 && safetyCount < maxNodes) {
-      safetyCount++;
-      const { x, y, angle, len, d, wi, fi } = stack.pop();
-
-      const x2 = x + Math.cos(angle) * len;
-      const y2 = y + Math.sin(angle) * len;
-
-      // Depth 0 = tips (brightest, most outward color)
-      const depthFrac = (depth - d) / depth; // 0 at root, 1 at tips
-      const branchHue = (hue + depthFrac * 120) % 360; // color flows outward
-      const light     = 40 + depthFrac * 45;
-      const alpha     = 0.5 + depthFrac * 0.45;
-      const lw        = Math.max(0.5, (d + 0.5) * 0.9 + bands.bass * 1.5 * r);
-
-      ctx.shadowColor = `hsla(${branchHue},100%,70%,0.7)`;
-      ctx.shadowBlur  = depthFrac * (8 + this._beatPulse * 12);
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x2, y2);
-      ctx.strokeStyle = `hsla(${branchHue},85%,${light}%,${alpha})`;
-      ctx.lineWidth   = lw;
-      ctx.stroke();
-      ctx.shadowBlur  = 0;
-
-      if (d > 0) {
-        const wi1 = (wi + 1) % WAVE_SAMPLES;
-        const wi2 = (wi + 3) % WAVE_SAMPLES;
-        const fi1 = (fi + 1) % FREQ_SAMPLES;
-
-        // Wave-driven branch spread + animation
-        const spread    = (Math.PI / 4) + waveSamples[wi1] * 0.35 * r;
-        const lenScale  = 0.62 + freqSamples[fi1] * 0.18 * r;
-        const phaseWarp = Math.sin(this._fractalPhase + depthFrac * Math.PI) * 0.18 * r;
-
-        stack.push({
-          x: x2, y: y2,
-          angle: angle - spread + phaseWarp,
-          len:   len * lenScale,
-          d: d - 1, wi: wi1, fi: fi1,
-        });
-        stack.push({
-          x: x2, y: y2,
-          angle: angle + spread + phaseWarp,
-          len:   len * lenScale,
-          d: d - 1, wi: wi2, fi: fi1,
-        });
-      }
+    switch (ftype) {
+      case 'snowflake': this._drawFractalSnowflake(W, H, hue, r, depth, timeData, bands); break;
+      case 'sierpinski': this._drawFractalSierpinski(W, H, hue, r, depth, timeData, bands); break;
+      case 'fern':      this._drawFractalFern(W, H, hue, r, depth, timeData, bands); break;
+      case 'dragon':    this._drawFractalDragon(W, H, hue, r, depth, timeData, bands); break;
+      default:          this._drawFractalTree(W, H, hue, r, depth, timeData, bands); break;
     }
 
     ctx.globalCompositeOperation = 'source-over';
 
-    // Shockwave ring at root on beat
+    const cx = W / 2, cy = H * 0.75;
     for (const sw of this._shockwaves) {
       ctx.beginPath();
       ctx.arc(cx, cy, sw.r, 0, TWO_PI);
@@ -521,18 +497,324 @@ export class Visualizer {
     }
   }
 
-  // ── Mode 6: Lissajous ─────────────────────────────────────────────────────
-  // Performance-first: 150 steps, 1 curve per arm, no particles, shadowBlur glow.
-  // Color flows outward from center of each curve (dark at crossings, bright at extremes).
-  // Full figure drifts + rotates. Symmetry capped at 6 to stay smooth.
+  // ── Fractal: Tree ─────────────────────────────────────────────────────────
 
-  _drawLissajous(bands, dt) {
+  _drawFractalTree(W, H, hue, r, depth, timeData, bands) {
+    const { ctx } = this;
+    const baseLen = Math.min(W, H) * (0.22 + bands.bass * 0.08 * r);
+    const cx = W / 2;
+    const cy = H * 0.75;
+
+    const WAVE_SAMPLES = 32;
+    const waveSamples  = new Float32Array(WAVE_SAMPLES);
+    for (let i = 0; i < WAVE_SAMPLES; i++) {
+      const idx = Math.floor((i / WAVE_SAMPLES) * timeData.length);
+      waveSamples[i] = (timeData[idx] / 128 - 1);
+    }
+
+    const FREQ_SAMPLES = 16;
+    const freqSamples  = new Float32Array(FREQ_SAMPLES);
+    for (let i = 0; i < FREQ_SAMPLES; i++) {
+      const idx = Math.floor((i / FREQ_SAMPLES) * Math.min(bands.bass !== undefined ? 128 : 128, 128));
+      // Use timeData as proxy for freq
+      freqSamples[i] = Math.abs(waveSamples[i % WAVE_SAMPLES]);
+    }
+
+    const stack = [];
+    stack.push({ x: cx, y: cy, angle: -Math.PI / 2, len: baseLen, d: depth, wi: 0 });
+
+    let safetyCount = 0;
+    const maxNodes  = depth === 4 ? 400 : depth === 3 ? 180 : 80;
+
+    while (stack.length > 0 && safetyCount < maxNodes) {
+      safetyCount++;
+      const { x, y, angle, len, d, wi } = stack.pop();
+
+      const x2 = x + Math.cos(angle) * len;
+      const y2 = y + Math.sin(angle) * len;
+
+      const depthFrac = (depth - d) / depth;
+      const branchHue = (hue + depthFrac * 120) % 360;
+      const light     = 40 + depthFrac * 45;
+      const alpha     = 0.5 + depthFrac * 0.45;
+      const lw        = Math.max(0.5, (d + 0.5) * 0.9 + bands.bass * 1.5 * r);
+
+      // Glow on outermost branches only
+      if (depthFrac > 0.6) {
+        ctx.shadowColor = `hsla(${branchHue},100%,70%,0.7)`;
+        ctx.shadowBlur  = depthFrac * (8 + this._beatPulse * 12);
+      } else {
+        ctx.shadowBlur = 0;
+      }
+      ctx.strokeStyle = `hsla(${branchHue},85%,${light}%,${alpha})`;
+      ctx.lineWidth   = lw;
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
+
+      this._drawBranch(x, y, x2, y2, wi, timeData, r);
+      ctx.shadowBlur = 0;
+
+      if (d > 0) {
+        const wi1 = (wi + 1) % WAVE_SAMPLES;
+        const wi2 = (wi + 3) % WAVE_SAMPLES;
+        const spread    = (Math.PI / 4) + waveSamples[wi1] * 0.35 * r;
+        const lenScale  = 0.62 + Math.abs(freqSamples[wi % FREQ_SAMPLES]) * 0.18 * r;
+        const phaseWarp = Math.sin(this._fractalPhase + depthFrac * Math.PI) * 0.18 * r;
+        stack.push({ x: x2, y: y2, angle: angle - spread + phaseWarp, len: len * lenScale, d: d - 1, wi: wi1 });
+        stack.push({ x: x2, y: y2, angle: angle + spread + phaseWarp, len: len * lenScale, d: d - 1, wi: wi2 });
+      }
+    }
+  }
+
+  // ── Fractal: Koch Snowflake ────────────────────────────────────────────────
+
+  _drawFractalSnowflake(W, H, hue, r, depth, timeData, bands) {
+    const { ctx } = this;
+    const cx = W / 2, cy = H / 2;
+    const size = Math.min(W, H) * 0.38 * (1 + bands.bass * 0.15 * r);
+
+    // Build Koch snowflake edges iteratively
+    // Start with equilateral triangle
+    const h3 = (Math.sqrt(3) / 2) * size;
+    let pts = [
+      { x: cx,          y: cy - h3 * 2 / 3 },
+      { x: cx + size/2, y: cy + h3 / 3 },
+      { x: cx - size/2, y: cy + h3 / 3 },
+    ];
+
+    // Iteratively subdivide edges (Koch curve)
+    for (let iter = 0; iter < depth; iter++) {
+      const next = [];
+      for (let i = 0; i < pts.length; i++) {
+        const p1 = pts[i];
+        const p2 = pts[(i + 1) % pts.length];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const a = { x: p1.x + dx / 3, y: p1.y + dy / 3 };
+        const b = { x: p1.x + dx * 2 / 3, y: p1.y + dy * 2 / 3 };
+        const mx = (p1.x + p2.x) / 2;
+        const my = (p1.y + p2.y) / 2;
+        const len = Math.sqrt(dx * dx + dy * dy) / 3;
+        const angle = Math.atan2(dy, dx) - Math.PI / 3;
+        const peak = { x: a.x + Math.cos(angle) * len, y: a.y + Math.sin(angle) * len };
+        next.push(p1, a, peak, b);
+      }
+      pts = next;
+    }
+
+    // Draw each edge as a waveform-displaced branch
+    const totalEdges = pts.length;
+    for (let i = 0; i < totalEdges; i++) {
+      const p1 = pts[i];
+      const p2 = pts[(i + 1) % totalEdges];
+      const distFrac = Math.sqrt((p1.x - cx) ** 2 + (p1.y - cy) ** 2) / (Math.min(W, H) * 0.5);
+      const edgeHue  = (hue + distFrac * 80) % 360;
+      const light    = 40 + distFrac * 45;
+      ctx.strokeStyle = `hsla(${edgeHue},85%,${light}%,0.88)`;
+      ctx.lineWidth   = 1.2 + bands.mid * 1.5 * r;
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
+      if (distFrac > 0.7) {
+        ctx.shadowColor = `hsla(${edgeHue},100%,70%,0.7)`;
+        ctx.shadowBlur  = 4 + this._beatPulse * 10;
+      } else {
+        ctx.shadowBlur = 0;
+      }
+      this._drawBranch(p1.x, p1.y, p2.x, p2.y, i, timeData, r * 0.4);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // ── Fractal: Sierpinski Triangle ──────────────────────────────────────────
+
+  _drawFractalSierpinski(W, H, hue, r, depth, timeData, bands) {
+    const { ctx } = this;
+    const cx = W / 2, cy = H / 2;
+    const size = Math.min(W, H) * 0.42 * (1 + bands.bass * 0.1 * r);
+    const h3   = (Math.sqrt(3) / 2) * size;
+
+    // Root triangle
+    const rootTri = [
+      { x: cx,          y: cy - h3 * 2 / 3 },
+      { x: cx + size/2, y: cy + h3 / 3 },
+      { x: cx - size/2, y: cy + h3 / 3 },
+    ];
+
+    // Iterative Sierpinski via subdivision — collect leaf triangles
+    let triangles = [rootTri];
+    for (let iter = 0; iter < depth; iter++) {
+      const next = [];
+      for (const tri of triangles) {
+        const [a, b, c] = tri;
+        const ab = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const bc = { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 };
+        const ca = { x: (c.x + a.x) / 2, y: (c.y + a.y) / 2 };
+        next.push([a, ab, ca], [ab, b, bc], [ca, bc, c]);
+      }
+      triangles = next;
+      if (triangles.length > 600) break; // safety cap
+    }
+
+    let wi = 0;
+    for (const tri of triangles) {
+      const centX = (tri[0].x + tri[1].x + tri[2].x) / 3;
+      const centY = (tri[0].y + tri[1].y + tri[2].y) / 3;
+      const distFrac = Math.sqrt((centX - cx) ** 2 + (centY - cy) ** 2) / (Math.min(W, H) * 0.5);
+      const triHue   = (hue + distFrac * 80) % 360;
+      const light    = 40 + distFrac * 45;
+      ctx.strokeStyle = `hsla(${triHue},85%,${light}%,0.82)`;
+      ctx.lineWidth   = 1 + bands.mid * r;
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
+      if (distFrac > 0.6) {
+        ctx.shadowColor = `hsla(${triHue},100%,70%,0.6)`;
+        ctx.shadowBlur  = 3 + this._beatPulse * 8;
+      } else {
+        ctx.shadowBlur = 0;
+      }
+      for (let e = 0; e < 3; e++) {
+        const p1 = tri[e];
+        const p2 = tri[(e + 1) % 3];
+        this._drawBranch(p1.x, p1.y, p2.x, p2.y, wi++, timeData, r * 0.3);
+      }
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // ── Fractal: Barnsley Fern ────────────────────────────────────────────────
+
+  _drawFractalFern(W, H, hue, r, depth, timeData, bands) {
+    const { ctx } = this;
+    const cx = W / 2;
+    const baseY = H * 0.88;
+    const scaleF = Math.min(W, H) * (0.065 + bands.bass * 0.015 * r);
+
+    // 4 affine transforms for Barnsley fern
+    const transforms = [
+      { a:  0,     b:  0,     c:  0,     d:  0.16,  e: 0, f: 0,     p: 0.01 },
+      { a:  0.85,  b:  0.04,  c: -0.04,  d:  0.85,  e: 0, f: 1.6,   p: 0.85 },
+      { a:  0.20,  b: -0.26,  c:  0.23,  d:  0.22,  e: 0, f: 1.6,   p: 0.07 },
+      { a: -0.15,  b:  0.28,  c:  0.26,  d:  0.24,  e: 0, f: 0.44,  p: 0.07 },
+    ];
+
+    const ITER = depth === 4 ? 4000 : depth === 3 ? 2000 : 1000;
+    let fx = 0, fy = 0;
+
+    // Skip first 20 iterations for convergence
+    for (let i = 0; i < 20; i++) {
+      const rnd = Math.random();
+      let cum = 0;
+      for (const t of transforms) {
+        cum += t.p;
+        if (rnd < cum) {
+          const nx = t.a * fx + t.b * fy + t.e;
+          const ny = t.c * fx + t.d * fy + t.f;
+          fx = nx; fy = ny;
+          break;
+        }
+      }
+    }
+
+    const wLen = timeData.length;
+    for (let i = 0; i < ITER; i++) {
+      const rnd = Math.random();
+      let cum = 0;
+      for (const t of transforms) {
+        cum += t.p;
+        if (rnd < cum) {
+          const nx = t.a * fx + t.b * fy + t.e;
+          const ny = t.c * fx + t.d * fy + t.f;
+          fx = nx; fy = ny;
+          break;
+        }
+      }
+
+      const sx = cx + fx * scaleF;
+      const sy = baseY - fy * scaleF;
+
+      const distFrac = Math.sqrt((sx - cx) ** 2 + (sy - H / 2) ** 2) / (Math.min(W, H) * 0.5);
+      const ptHue    = (hue + distFrac * 80 + fy * 5) % 360;
+      const light    = 40 + distFrac * 45;
+
+      // Waveform-reactive stroke length
+      const wIdx   = i % wLen;
+      const wave   = (timeData[wIdx] / 128 - 1) * 3 * r;
+      const strokeR = 1.5 + Math.abs(wave) + bands.mid * 2 * r;
+
+      ctx.beginPath();
+      ctx.arc(sx, sy, strokeR * 0.5, 0, TWO_PI);
+      ctx.fillStyle = `hsla(${ptHue},85%,${light}%,0.7)`;
+      ctx.fill();
+    }
+  }
+
+  // ── Fractal: Dragon Curve ─────────────────────────────────────────────────
+
+  _drawFractalDragon(W, H, hue, r, depth, timeData, bands) {
+    const { ctx } = this;
+    const cx = W / 2, cy = H / 2;
+
+    // Build dragon curve iteratively
+    // Start with a single segment direction sequence [1] means turn right
+    const iters = Math.min(depth * 3, 10);
+    if (this._dragonSeq === null || this._dragonDepth !== iters) {
+      let seq = [1];
+      for (let i = 0; i < iters - 1; i++) {
+        const copy = seq.slice().reverse().map(x => -x);
+        seq = [...seq, 1, ...copy];
+      }
+      this._dragonSeq  = seq;
+      this._dragonDepth = iters;
+    }
+    const seq = this._dragonSeq;
+
+    const segLen = Math.min(W, H) * 0.36 / Math.pow(Math.sqrt(2), iters);
+    let px = cx, py = cy;
+    let angle = 0;
+    const totalSegs = seq.length + 1;
+
+    for (let i = 0; i < totalSegs; i++) {
+      const nx = px + Math.cos(angle) * segLen;
+      const ny = py + Math.sin(angle) * segLen;
+
+      const distFrac = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2) / (Math.min(W, H) * 0.5);
+      const segHue   = (hue + distFrac * 80 + (i / totalSegs) * 60) % 360;
+      const light    = 40 + distFrac * 45;
+      ctx.strokeStyle = `hsla(${segHue},85%,${light}%,0.85)`;
+      ctx.lineWidth   = 1.2 + bands.mid * r;
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
+
+      if (distFrac > 0.6) {
+        ctx.shadowColor = `hsla(${segHue},100%,70%,0.7)`;
+        ctx.shadowBlur  = 3 + this._beatPulse * 8;
+      } else {
+        ctx.shadowBlur = 0;
+      }
+
+      this._drawBranch(px, py, nx, ny, i, timeData, r * 0.35);
+      ctx.shadowBlur = 0;
+
+      px = nx;
+      py = ny;
+      if (i < seq.length) {
+        angle += seq[i] * Math.PI / 2;
+      }
+    }
+  }
+
+  // ── Mode 6: Lissajous ─────────────────────────────────────────────────────
+  // timeData now perturbs the path for subtle waveform character.
+
+  _drawLissajous(timeData, bands, dt) {
     const { ctx, canvas } = this;
     const W  = canvas.width, H = canvas.height;
     const s  = window.VIZ_SETTINGS;
     const hue = this._dHue();
     const r   = s.reactivity;
 
+    // Fade in source-over BEFORE any other drawing
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
     ctx.fillRect(0, 0, W, H);
 
@@ -544,8 +826,9 @@ export class Visualizer {
     if (Math.abs(this._lissDriftY) > driftAmp) this._lissDriftVY *= -1;
     this._lissRotation += dt * (0.04 + bands.mid * 0.06 * r);
 
-    const cx = W / 2 + this._lissDriftX;
-    const cy = H / 2 + this._lissDriftY;
+    const driftCX = W / 2 + this._lissDriftX;
+    const driftCY = H / 2 + this._lissDriftY;
+    const cx = driftCX, cy = driftCY;
 
     // Animate curves
     for (const c of this.curves) {
@@ -563,11 +846,10 @@ export class Visualizer {
     const energy  = bands.mid + bands.bass * 0.5;
     const baseR   = Math.min(W, H) * 0.36;
     const amp     = baseR * (0.55 + energy * 0.45);
-    // Cap at 6 arms max — 8/12 causes severe lag
     const SYM     = Math.min(s.symmetry, 6);
-    // Always just 1 curve per arm — curveCount only selects which curve params to use
     const curveIdx = Math.min((s.curveCount ?? 1) - 1, this.curves.length - 1);
     const c        = this.curves[curveIdx];
+    const tLen     = timeData ? timeData.length : 0;
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -578,23 +860,17 @@ export class Visualizer {
       ctx.rotate((sym / SYM) * TWO_PI);
       if (sym % 2 === 1) ctx.scale(1, -1);
 
-      // Per-arm hue — each arm gets its own color, cycling independently
       const armHue = (hue + this._curveHueOffsets[sym % 3] + sym * (360 / SYM)) % 360;
       const light  = 58 + energy * 18 + this._beatPulse * 20;
       const alpha  = 0.75 + this._beatPulse * 0.25;
       const lw     = (1.4 + energy * 1.8) * (1 + this._beatPulse * 1.8 * r);
 
-      // Build path — color flows outward: use a gradient stroke
-      // We do this by segmenting the curve into chunks and shifting hue by distance from center
       const SEGS   = CURVE_STEPS;
-      const CHUNKS = 6; // split curve into 6 color segments
+      const CHUNKS = 6;
       const segLen = Math.floor(SEGS / CHUNKS);
 
       for (let chunk = 0; chunk < CHUNKS; chunk++) {
-        const t0 = chunk / CHUNKS;
-        // Outward color: hue shifts as we move along the curve
         const chunkHue = (armHue + chunk * 18) % 360;
-        // Glow only on the outer half of the curve (chunks 3–5)
         ctx.shadowColor = chunk >= 3
           ? `hsla(${chunkHue},100%,72%,0.85)`
           : 'transparent';
@@ -602,9 +878,16 @@ export class Visualizer {
 
         ctx.beginPath();
         for (let i = chunk * segLen; i <= Math.min((chunk + 1) * segLen, SEGS); i++) {
-          const t = (i / SEGS) * CURVE_PERIOD;
-          const x = amp * Math.sin(c.a * t + c.phase);
-          const y = amp * Math.sin(c.b * t);
+          const t     = (i / SEGS) * CURVE_PERIOD;
+          let x       = amp * Math.sin(c.a * t + c.phase);
+          let y       = amp * Math.sin(c.b * t);
+          // Subtle timeData perturbation
+          if (tLen > 0) {
+            const wIdx = Math.floor((i / SEGS) * tLen) % tLen;
+            const wave = (timeData[wIdx] / 128 - 1) * amp * 0.04 * r;
+            x += wave;
+            y += wave * 0.7;
+          }
           i === chunk * segLen ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         }
         ctx.strokeStyle = `hsla(${chunkHue},88%,${light}%,${alpha})`;
@@ -612,13 +895,12 @@ export class Visualizer {
         ctx.stroke();
       }
       ctx.shadowBlur = 0;
-
       ctx.restore();
     }
 
     ctx.restore();
 
-    // Shockwaves
+    // Shockwaves centered on drift position
     for (const sw of this._shockwaves) {
       ctx.beginPath();
       ctx.arc(cx, cy, sw.r, 0, TWO_PI);
@@ -629,8 +911,9 @@ export class Visualizer {
   }
 
   // ── Mode 7: Blob ──────────────────────────────────────────────────────────
+  // Blob outline driven by timeData samples around perimeter.
 
-  _drawBlob(freqData, bands, dt) {
+  _drawBlob(timeData, bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
@@ -638,37 +921,40 @@ export class Visualizer {
     const hue = this._dHue();
     const r   = s.reactivity;
 
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = `rgba(0,0,0,${s.fadeAlpha})`;
     ctx.fillRect(0, 0, W, H);
 
     const baseRadius = Math.min(W, H) * 0.25;
     this._blobPhase += dt * (1.5 + bands.mid * 2);
+    const tLen = timeData.length;
 
     for (let layer = 2; layer >= 0; layer--) {
-      const phaseOff   = layer * 0.7;
       const layerAlpha = layer === 0 ? 0.85 : 0.15 + layer * 0.1;
       const layerScale = 1 + layer * 0.12;
       const layerHue   = (hue + layer * 40) % 360;
+      const STEPS = 120;
 
       ctx.beginPath();
-      for (let i = 0; i <= 120; i++) {
-        const angle  = (i / 120) * TWO_PI;
-        const phase  = this._blobPhase + phaseOff;
-        const noise1 = Math.sin(angle * 3 + phase) * Math.cos(angle * 2 + phase * 0.7);
-        const noise2 = Math.sin(angle * 5 + phase * 1.3) * 0.5;
-        const noise3 = Math.sin(angle * 8 + phase * 2.1) * 0.25;
-        const disp   = (noise1 + noise2 * bands.mid * r + noise3 * bands.high * r) * baseRadius * 0.35;
+      for (let i = 0; i <= STEPS; i++) {
+        const angle = (i / STEPS) * TWO_PI;
+        // Map timeData around perimeter instead of sine noise
+        const wIdx   = Math.floor((i / STEPS) * tLen) % tLen;
+        const wave   = (timeData[wIdx] / 128 - 1);
+        // Blend with a little sine for smoothness even at silence
+        const sineNoise = Math.sin(angle * 3 + this._blobPhase) * 0.2;
+        const disp   = (wave * 0.8 + sineNoise) * baseRadius * 0.35 * r;
         const rad    = baseRadius * layerScale * (1 + bands.bass * 0.6 * r + this._beatPulse * 0.3) + disp;
-        // Color flows outward from center
-        const pointHue = (layerHue + (rad / (baseRadius * 2)) * 60) % 360;
+
+        const distFrac = rad / (baseRadius * 2);
         const x = cx + rad * Math.cos(angle);
         const y = cy + rad * Math.sin(angle);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.closePath();
-      ctx.fillStyle   = `hsla(${layerHue},75%,50%,${layerAlpha * 0.4})`;
+      ctx.fillStyle = `hsla(${layerHue},75%,50%,${layerAlpha * 0.4})`;
       ctx.fill();
-      // Glow on outer layer only
+
       if (layer === 0) {
         ctx.shadowColor = `hsla(${layerHue},100%,70%,0.8)`;
         ctx.shadowBlur  = 8 + this._beatPulse * 16;
@@ -676,24 +962,26 @@ export class Visualizer {
       ctx.strokeStyle = `hsla(${layerHue},85%,65%,${layerAlpha})`;
       ctx.lineWidth   = 1.5;
       ctx.stroke();
-      ctx.shadowBlur  = 0;
+      ctx.shadowBlur = 0;
     }
   }
 
   // ── Mode 8: Rings ─────────────────────────────────────────────────────────
+  // Each ring's circumference is driven by timeData — waveform-displaced circle.
 
-  _drawRings(freqData, bands, dt) {
+  _drawRings(freqData, timeData, bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
     const s  = window.VIZ_SETTINGS;
     const hue = this._dHue();
     const r   = s.reactivity;
+    const tLen = timeData.length;
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.06)})`;
-    ctx.fillRect(0, 0, W, H);
+    // Fade in source-over BEFORE screen mode
+    this._applyFade(W, H);
 
-    const maxR  = Math.min(W, H) * 0.45;
+    const maxR   = Math.min(W, H) * 0.45;
     const innerR = maxR * 0.1;
 
     ctx.save();
@@ -711,19 +999,36 @@ export class Visualizer {
 
       const baseR  = innerR + (i / 7) * (maxR - innerR);
       const ringR  = baseR + energy * 120 * r + this._beatPulse * 20;
-      // Color flows outward — outer rings shift hue
-      const ringHue = (hue + i * 25 + energy * 20) % 360;
+      const distFrac = ringR / maxR;
+      const ringHue  = (hue + distFrac * 80 + energy * 20) % 360;
+      const light    = 35 + distFrac * 45;
+      const lw       = 2 + energy * 15 * r;
 
       ctx.shadowColor = `hsla(${ringHue},100%,70%,0.7)`;
       ctx.shadowBlur  = 4 + energy * 12 + (i === 7 ? this._beatPulse * 14 : 0);
+      ctx.strokeStyle = `hsla(${ringHue},88%,${light}%,${0.5 + energy * 0.5})`;
+      ctx.lineWidth   = lw;
+      ctx.lineJoin    = 'round';
+
+      // Draw ring as waveform-displaced circle
+      const RING_SEGS = 64;
       ctx.beginPath();
-      ctx.arc(0, 0, ringR, 0, TWO_PI);
-      ctx.strokeStyle = `hsla(${ringHue},88%,${50 + energy * 30}%,${0.5 + energy * 0.5})`;
-      ctx.lineWidth   = 2 + energy * 15 * r;
+      for (let j = 0; j <= RING_SEGS; j++) {
+        const angle  = (j / RING_SEGS) * TWO_PI;
+        const wIdx   = Math.floor((j / RING_SEGS) * tLen) % tLen;
+        const wave   = (timeData[wIdx] / 128 - 1) * ringR * 0.15 * r * energy;
+        const rr     = ringR + wave;
+        const x = rr * Math.cos(angle);
+        const y = rr * Math.sin(angle);
+        j === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
       ctx.stroke();
-      ctx.shadowBlur  = 0;
+      ctx.shadowBlur = 0;
     }
     ctx.restore();
+
+    ctx.globalCompositeOperation = 'source-over';
 
     if (this._beatPulse > 0.8) {
       this._ringWaves.push({
@@ -744,11 +1049,9 @@ export class Visualizer {
       ctx.lineWidth   = rw.lineWidth;
       ctx.stroke();
     }
-    ctx.globalCompositeOperation = 'source-over';
   }
 
   // ── Mode 9: Spiral ────────────────────────────────────────────────────────
-  // Color flows outward along the spiral: inner = dark/cool, outer = bright/warm.
 
   _drawSpiral(freqData, timeData, bands, dt) {
     const { ctx, canvas } = this;
@@ -758,6 +1061,7 @@ export class Visualizer {
     const hue = this._dHue();
     const r   = s.reactivity;
 
+    ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.04)})`;
     ctx.fillRect(0, 0, W, H);
 
@@ -775,12 +1079,11 @@ export class Visualizer {
       const chunkLen  = Math.floor(len / CHUNKS);
 
       for (let chunk = 0; chunk < CHUNKS; chunk++) {
-        const outFrac  = chunk / CHUNKS; // 0 = inner, 1 = outer
+        const outFrac  = chunk / CHUNKS;
         const chunkHue = (armHue + outFrac * 80) % 360;
         const light    = 38 + outFrac * 42;
         const lw       = 1.4 + outFrac * 1.8 + bands.bass * 2 * r + this._beatPulse * 1.5;
 
-        // Glow only on outer chunks
         ctx.shadowColor = outFrac > 0.5 ? `hsla(${chunkHue},100%,70%,0.85)` : 'transparent';
         ctx.shadowBlur  = outFrac > 0.5 ? (6 + this._beatPulse * 16 * r) : 0;
 
@@ -815,7 +1118,6 @@ export class Visualizer {
   }
 
   // ── Mode 10: Polygon ──────────────────────────────────────────────────────
-  // Waveform rides morphing polygon outlines. Color flows outward layer by layer.
 
   _drawPolygon(freqData, timeData, bands, dt) {
     const { ctx, canvas } = this;
@@ -825,8 +1127,8 @@ export class Visualizer {
     const hue = this._dHue();
     const r   = s.reactivity;
 
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(s.fadeAlpha, 0.05)})`;
-    ctx.fillRect(0, 0, W, H);
+    // Fade in source-over before screen
+    this._applyFade(W, H);
 
     this._polyRotation += dt * (0.18 + bands.mid * 0.6 * r);
     this._polyMorphT    = Math.min(1, this._polyMorphT + dt * 2.5);
@@ -849,13 +1151,12 @@ export class Visualizer {
     for (let layer = LAYERS; layer >= 1; layer--) {
       const layerT   = layer / LAYERS;
       const layerR   = baseR * layerT * (1 + bands.bass * 0.5 * r + this._beatPulse * 0.25 * r);
-      // Color flows outward: outer layers get brighter, more saturated hue shift
-      const layerHue = (hue + (LAYERS - layer) * 22) % 360;
-      const light    = 38 + layerT * 36;
+      const distFrac = layerR / (Math.min(W, H) * 0.7);
+      const layerHue = (hue + distFrac * 80) % 360;
+      const light    = 38 + distFrac * 45;
       const alpha    = 0.28 + layerT * 0.55;
       const lw       = 1 + (1 - layerT) * 3 + (layer === LAYERS ? this._beatPulse * 3 : 0);
 
-      // Glow on outermost layer only
       ctx.shadowColor = layer === LAYERS ? `hsla(${layerHue},100%,72%,0.9)` : 'transparent';
       ctx.shadowBlur  = layer === LAYERS ? (6 + this._beatPulse * 22 * r) : 0;
 
@@ -890,19 +1191,19 @@ export class Visualizer {
   }
 
   // ── Mode 11: Tunnel ───────────────────────────────────────────────────────
-  // Rings always fill center — min projected radius ensures no empty middle.
-  // Color flows outward: inner rings cooler, outer rings warmer/brighter.
+  // Each tunnel ring perimeter is waveform-displaced.
 
-  _drawTunnel(freqData, bands, dt) {
+  _drawTunnel(freqData, timeData, bands, dt) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
     const s  = window.VIZ_SETTINGS;
     const hue = this._dHue();
     const r   = s.reactivity;
+    const tLen = timeData.length;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(0, 0, W, H);
+    // Fade in source-over BEFORE screen mode
+    this._applyFade(W, H);
 
     const fallSpeed = 0.8 + bands.bass * 2.5 * r + this._beatPulse * 2.0 * r;
     this._tunnelSpeed += (fallSpeed - this._tunnelSpeed) * dt * 4;
@@ -924,16 +1225,15 @@ export class Visualizer {
       ring.z -= dt * this._tunnelSpeed * 0.18;
       ring.hue = (ring.hue + dt * 40) % 360;
       if (ring.z <= 0.02) {
-        ring.z   += 1.0;
-        ring.hue  = (hue + Math.random() * 60) % 360;
+        ring.z    += 1.0;
+        ring.hue   = (hue + Math.random() * 60) % 360;
         ring.twist = this._tunnelAngle;
       }
     }
 
     this._tunnelRings.sort((a, b) => b.z - a.z);
 
-    // Projection: guarantee a minimum visible radius so center is never empty
-    const minScreenR = Math.min(W, H) * 0.06; // always at least 6% of screen
+    const minScreenR = Math.min(W, H) * 0.06;
     const project = z => {
       const fov   = 0.55;
       const scale = fov / Math.max(z, 0.001);
@@ -944,33 +1244,35 @@ export class Visualizer {
 
     for (const ring of this._tunnelRings) {
       const radius  = project(ring.z);
-      const nearFac = 1 - ring.z; // 0 = far, 1 = near/large
+      const nearFac = 1 - ring.z;
       const opacity = Math.min(1, nearFac * 2.0) * (0.35 + nearFac * 0.6);
       const lw      = 1.5 + nearFac * 5 + this._beatPulse * 3 * nearFac;
 
-      const binIdx  = Math.floor(ring.z * Math.min(freqData.length, 180));
-      const energy  = freqData[binIdx] / 255;
-      const throb   = 1 + energy * 0.35 * r;
-      const twist   = ring.twist + nearFac * this._tunnelAngle * 0.3;
+      const binIdx = Math.floor(ring.z * Math.min(freqData.length, 180));
+      const energy = freqData[binIdx] / 255;
+      const throb  = 1 + energy * 0.35 * r;
+      const twist  = ring.twist + nearFac * this._tunnelAngle * 0.3;
 
-      // Color flows outward: near (large) rings are brighter/warmer
-      const ringHue = (ring.hue + nearFac * 40) % 360;
-      const light   = 35 + nearFac * 45;
+      const distFrac = radius / (Math.min(W, H) * 0.7);
+      const ringHue  = (ring.hue + distFrac * 80) % 360;
+      const light    = 35 + distFrac * 45;
 
       const SEGS = 64;
       ctx.beginPath();
       for (let i = 0; i <= SEGS; i++) {
-        const angle    = (i / SEGS) * TWO_PI + twist;
-        const warpBin  = Math.floor((i / SEGS) * Math.min(freqData.length, 256));
-        const warp     = (freqData[warpBin] / 255) * radius * 0.12 * r * nearFac;
-        const rr       = radius * throb + warp;
+        const angle  = (i / SEGS) * TWO_PI + twist;
+        const wIdx   = Math.floor((i / SEGS) * tLen) % tLen;
+        // Waveform drives ring perimeter shape
+        const wave   = (timeData[wIdx] / 128 - 1) * radius * 0.18 * r * nearFac;
+        const warpBin = Math.floor((i / SEGS) * Math.min(freqData.length, 256));
+        const freqWarp = (freqData[warpBin] / 255) * radius * 0.08 * r * nearFac;
+        const rr     = radius * throb + wave + freqWarp;
         const x = cx + rr * Math.cos(angle);
         const y = cy + rr * Math.sin(angle);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.closePath();
 
-      // Glow only on nearest (largest) rings
       ctx.shadowColor = nearFac > 0.6 ? `hsla(${ringHue},100%,70%,0.8)` : 'transparent';
       ctx.shadowBlur  = nearFac > 0.6 ? (4 + nearFac * 14 + this._beatPulse * 10) : 0;
       ctx.strokeStyle = `hsla(${ringHue},90%,${light}%,${opacity})`;

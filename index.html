@@ -126,6 +126,18 @@
         </div>
       </div>
 
+      <!-- Fractal Type -->
+      <div class="panel-section">
+        <div class="panel-label">Fractal Type</div>
+        <div class="btn-group">
+          <button class="fractaltype-btn" data-fractaltype="tree">Tree</button>
+          <button class="fractaltype-btn" data-fractaltype="snowflake">Flake</button>
+          <button class="fractaltype-btn" data-fractaltype="sierpinski">Sierp</button>
+          <button class="fractaltype-btn" data-fractaltype="fern">Fern</button>
+          <button class="fractaltype-btn" data-fractaltype="dragon">Dragon</button>
+        </div>
+      </div>
+
       <!-- Reactivity -->
       <div class="panel-section">
         <div class="panel-label">Reactivity</div>
@@ -267,6 +279,17 @@
         setActive('.preset-btn', 'preset', null);
       });
     });
+
+    // ── Fractal type buttons ───────────────────────────────────────────────────
+    document.querySelectorAll('.fractaltype-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.VIZ_SETTINGS.fractalType = btn.dataset.fractaltype;
+        setActive('.fractaltype-btn', 'fractaltype', btn.dataset.fractaltype);
+      });
+    });
+    // Set default active
+    window.VIZ_SETTINGS.fractalType = 'tree';
+    setActive('.fractaltype-btn', 'fractaltype', 'tree');
 
     // ── Reactivity slider ──────────────────────────────────────────────────────
     reactSlider.addEventListener('input', () => {

@@ -3,26 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spotify Visualizer</title>
+  <title>Music Visualizer</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
-  <!-- ── Login screen (kept in DOM for OAuth redirect compatibility) ──────── -->
-  <!-- app.js no longer shows this screen by default — it goes straight to    -->
-  <!-- capture-screen. It is only used if auth.js needs to redirect back here. -->
-  <div id="login-screen" class="screen">
-    <div class="login-card">
-      <h1>Spotify Visualizer</h1>
-      <p>Connecting your Spotify account…</p>
-    </div>
-  </div>
 
   <!-- ── Capture / share-audio prompt ─────────────────────────────────────── -->
   <div id="capture-screen" class="screen">
     <div class="capture-card">
       <div class="capture-icon">🎵</div>
       <h2 class="capture-title">Music Visualizer</h2>
+
       <ol class="capture-steps">
         <li>Play music in any browser tab (Spotify, YouTube, SoundCloud…)</li>
         <li>Click the button below</li>
@@ -33,12 +24,6 @@
       </button>
       <p id="capture-error" class="capture-error" hidden></p>
       <p class="capture-note">Chrome recommended — Firefox and Safari do not support tab audio capture.</p>
-      <p class="capture-note" style="margin-top:0.5rem;">
-        <button id="spotify-login-btn" class="btn-link" type="button">
-          Connect Spotify
-        </button>
-        to show track name &amp; artist while visualizing.
-      </p>
     </div>
   </div>
 
@@ -226,15 +211,6 @@
       </div>
 
     </div><!-- /control-panel -->
-
-    <!-- Track info — bottom-left, shown when a track is playing -->
-    <div id="track-info" class="track-info hidden">
-      <span id="song-name"   class="song-name"></span>
-      <span id="artist-name" class="artist-name"></span>
-    </div>
-
-    <!-- Kept for app.js compatibility; invisible in normal use -->
-    <p id="not-playing" class="not-playing">Nothing playing</p>
 
   </div>
 

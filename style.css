@@ -153,6 +153,8 @@ h1 {
   left: 16px;
   z-index: 199;
   width: 292px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
   background: rgba(8, 8, 8, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
@@ -167,6 +169,23 @@ h1 {
   transition:
     opacity     0.22s ease,
     transform   0.22s ease;
+}
+
+.control-panel::-webkit-scrollbar {
+  width: 4px;
+}
+
+.control-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.control-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+
+.control-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 .control-panel.open {

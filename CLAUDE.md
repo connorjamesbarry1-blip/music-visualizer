@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A browser-based Spotify visualizer — vanilla HTML/CSS/JS with no build step or bundler. It uses the Spotify Web API and likely the Web Audio API for visualization.
+A browser-based music visualizer — vanilla HTML/CSS/JS with no build step, no bundler, and no external API dependencies. Audio is captured directly from any playing browser tab via the Web Audio API (`getDisplayMedia`). No authentication, no Spotify SDK, no backend.
 
 ## Running the App
 
-Since this is a static site and Spotify OAuth requires an HTTPS or localhost redirect URI, serve it with a local HTTP server rather than opening `index.html` directly:
+This is a fully static site. Serve it with a local HTTP server (opening `index.html` directly won't work due to ES module restrictions):
 
 ```powershell
 # Python (usually available)
@@ -18,23 +18,30 @@ python -m http.server 8080
 npx serve .
 ```
 
-Then open `http://localhost:8080` in a browser. The Spotify redirect URI must be registered in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and must match the origin you're serving from.
+Then open `http://localhost:8080` in Chrome. When prompted, select the tab playing music and tick **Share tab audio**.
+
+> Chrome is required — Firefox and Safari do not support tab audio capture via `getDisplayMedia`.
 
 ## Architecture
 
-No bundler, no framework — all modules are plain JS files loaded via `<script>` tags in `index.html`.
+No bundler, no framework — all modules are plain JS files loaded via `<script type="module">` in `index.html`.
 
 | File | Responsibility |
 |---|---|
-| `src/auth.js` | Spotify OAuth (PKCE flow or implicit grant), token storage/refresh |
-| `src/spotify.js` | Spotify Web API calls (currently playing, audio features, etc.) |
-| `src/visualizer.js` | Canvas/WebGL/Web Audio rendering loop |
-| `src/app.js` | Entry point — wires auth → API → visualizer together |
+| `src/app.js` | Entry point — wires AudioEngine → Visualizer → CatMode, runs RAF loop |
+| `src/audio.js` | Tab audio capture (`getDisplayMedia`), FFT analysis, beat detection (BPM via autocorrelation + PLL) |
+| `src/visualizer.js` | Canvas 2D rendering — 11 visualization modes |
+| `src/catmode.js` | Pixel-art cat overlay that dances to the beat |
 | `style.css` | Global styles |
+| `index.html` | App shell — settings panel, control script, canvas elements |
 
-## Spotify API Notes
+## Audio Pipeline
 
-- The app uses the Spotify Web API; a `client_id` is required (no `client_secret` in a pure browser app).
-- PKCE authorization code flow is the correct grant type for SPAs — do not use the implicit grant.
-- The `Authorization Code with PKCE` flow requires no server; the access token is obtained entirely in the browser.
-- Relevant scopes: `user-read-currently-playing`, `user-read-playback-state`, `streaming` (if using Playback SDK).
+1. `AudioEngine.start()` calls `getDisplayMedia({ video: true, audio: true })` — the user selects a tab and ticks "Share tab audio"
+2. The audio track is routed into a Web Audio `AnalyserNode` (FFT size 2048, **not** connected to `destination` — no echo)
+3. Each RAF frame: `getFrequencyData()` + `getTimeDomainData()` feed into `Visualizer.draw()`
+4. `BeatDetector` runs autocorrelation on a 50 Hz kick-energy ring buffer to estimate BPM, with a phase-locked loop for grid alignment
+
+## Settings
+
+`window.VIZ_SETTINGS` is a plain object written by the inline panel script in `index.html` and read every frame by `visualizer.js`. No module imports needed between them.

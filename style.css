@@ -484,7 +484,7 @@ input[type="range"]::-moz-range-track {
   margin: 0;
 }
 
-/* Subtle inline link-style button for optional Spotify connect */
+/* Subtle inline link-style text button */
 .btn-link {
   background: none;
   border: none;
